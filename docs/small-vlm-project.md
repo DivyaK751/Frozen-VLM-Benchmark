@@ -8,24 +8,74 @@ Paste this file at the start of a new chat, together with `docs/NOTES.md`. Last 
 - **Members:** Divyasri Kadekar (dk3480), Lakshya Khandelwal (lk3068), Ritwik Sharan (rs4764), Vinod Walia (vw2317).
 - **Question:** With a frozen SigLIP 2 So400m encoder and a 0.5B Qwen2.5 LLM, how much does adding LoRA improve ScienceQA-IMG, TextVQA and POPE compared with training only the MLP projector, and on which object types does each model hallucinate?
 - **Hypotheses:**
-  - H1: Projector + LoRA beats projector-only on all three benchmarks, with the largest gain on ScienceQA. *(Confounded by answer format, see section 6.)*
+  - H1: Projector + LoRA beats projector-only on all three benchmarks, with the largest gain on ScienceQA. *(Confounded by answer format, see section 7.)*
   - H2: Projector-only hallucinates more (lower POPE F1, higher "yes" rate), with the largest gap on the adversarial split.
   - H3: Blanking the image lowers TextVQA and POPE far more than ScienceQA, and the drop is smaller for projector-only (more reliance on language priors).
 
 ## 2. Architecture (from the abstract)
 Image (384 px) -> frozen SigLIP 2 So400m (`google/siglip2-so400m-patch14-384`) -> pooling -> 2-layer MLP projector with GELU, 1152 -> 896 (trained) -> Qwen2.5-0.5B-Instruct, which reads the visual tokens then the text prompt and generates the answer.
 
-**Verified on Colab:**
+**Verified on Colab (Colab's own package versions, not the pinned ones):**
 - Vision encoder output: `[1, 729, 1152]` (27x27 grid). Vision tower is 428.2M params.
 - LLM: 494.0M params, hidden size 896.
 - Neither model is gated (no Hugging Face token needed).
+- **To do:** re-run this shape check inside the pinned venv before the first real run (optional download of ~5 GB into the Hugging Face cache).
 
 **Open decision: pooling.** 27 is odd, so 2x2 pooling is not clean.
 - `avg_pool2d(kernel=2)` -> 13x13 = 169 tokens (drops the last row and column).
 - `adaptive_avg_pool2d` to 14x14 -> 196 tokens (keeps everything).
 - Pick one, record the reason in `docs/NOTES.md`, and write a shape test.
 
-## 3. Training plan
+## 3. Repository and environment
+
+### Repo and branches
+- **Shared repo (owned by Divya):** `Frozen-VLM-Benchmark` (private, I am a collaborator).
+- **My branch:** `no-lora` (the without-LoRA half). Never commit directly to `main`; merge through a pull request.
+- **Old personal repo `small-vlm`:** kept as a backup until everything is confirmed in the shared repo. Do not edit it. Do not delete it yet.
+- **Local path (Windows, Git Bash):** `C:\Columbia\Fall_Sem_26\Foundation Model Engineering\Frozen-VLM-Benchmark`
+
+### Layout
+```
+Frozen-VLM-Benchmark/
+  README.md             # overview, setup, workflow (draft on no-lora, pending team agreement)
+  pyproject.toml        # package metadata, requires Python >=3.11,<3.12, src layout
+  requirements.txt      # exact pinned versions (pip freeze, 74 lines)
+  runs.csv              # one row per kept run: GPU, hours, peak memory, dollars, commit
+  src/small_vlm/        # the importable package (connector.py, model.py, data.py go here)
+  configs/  scripts/  tests/  eval/  docs/
+  .gitignore            # excludes .venv, data, checkpoints, weights, credentials
+```
+Imports look like `from small_vlm.connector import ...`. **Paths in the task list below use this layout.**
+
+### Environment (identical on every machine)
+- **Python 3.11** (laptop: 3.11.8). Same minor version on laptop, VM and Vertex container. Record the exact patch version in `docs/NOTES.md`.
+- **Virtual environment:** `venv` in `.venv/` inside the repo (not conda). `venv` reuses an installed Python, so install Python 3.11 first.
+- **Editable install:** `pip install -e .` puts a pointer to `src/small_vlm` in site-packages, so `import small_vlm` works from any folder and edits take effect immediately. Verified: it resolves to the repo's `src/small_vlm/__init__.py`.
+- **Pinned versions** (from `requirements.txt`): torch 2.15.0 (CPU build on the laptop), torchvision 0.29.2, transformers 5.24.0 (new major version, differs from Colab), accelerate 1.16.0, peft 0.22.0, datasets 5.2.0, numpy 2.4.6, pandas 3.1.1, scipy 1.17.1, pillow 13.0.0, pytest 9.2.0, google-cloud-storage 3.17.1, plus tqdm, pyyaml and transitive dependencies.
+- **Verified:** imports of torch, transformers, peft, datasets, accelerate succeed with these versions; `pytest --version` works.
+
+### Setup for a teammate (Windows, Git Bash)
+```bash
+git clone <repo-link>
+cd Frozen-VLM-Benchmark
+git checkout -b <your-branch>        # or git checkout no-lora to join mine
+py -3.11 -m venv .venv
+source .venv/Scripts/activate        # prompt should show (.venv)
+python --version                     # expect 3.11.x
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+pip install -e .
+python -c "import small_vlm; print(small_vlm.__file__)"
+pytest
+```
+**Linux (VM):** `python3.11 -m venv .venv && source .venv/bin/activate`, then the same pip commands.
+
+### Known risks
+- `requirements.txt` was frozen on Windows. A Windows-only package could fail on Linux: if `pip install -r` errors on one, remove that line and note it here.
+- On a Linux GPU VM, check `torch.cuda.is_available()` on the cheap L4 VM before any A100 spend. The torch version stays the same; only the build (CPU vs. CUDA) differs.
+- When adding a package: install it in the venv, then regenerate with `pip freeze --exclude-editable > requirements.txt`, and tell the team.
+
+## 4. Training plan
 | Run | What trains | Data | Notes |
 |---|---|---|---|
 | E1 (Stage 1, alignment) | Projector only | LLaVA-Pretrain, 558K pairs, 1 epoch | Encoder and LLM frozen. Starting LR ~1e-3, batch ~256 (confirm on pilot). |
@@ -39,22 +89,25 @@ E2 and E3 must share the same E1 checkpoint, data order, seed, step count, chat 
 - `liuhaotian/LLaVA-Instruct-150K` (COCO images)
 - Evaluation: ScienceQA (image subset, test), TextVQA (val), POPE (random, popular, adversarial).
 
-## 4. Team split and my scope
+## 5. Team split and my scope
 The team divided the project in two halves:
 1. **Without LoRA, end to end** = **mine**: data pipeline, connector, training loop, E1, E2, the evaluation harness, baselines, and analysis for E2.
 2. **With LoRA, end to end** = teammates: E3 and its analysis.
 
 Agreements to make with the LoRA half (not yet done):
+- Branch names and merging: pull requests into `main`, nobody commits to `main` directly.
 - I produce E1 first and push it to Cloud Storage with a short README (pooling choice, LR, steps, commit hash), because E3 depends on it.
 - One shared codebase. LoRA is a config flag, not a separate implementation.
 - One shared evaluation harness. Per-sample outputs saved so paired tests work across E2 and E3.
+- Same Python 3.11 and the same `requirements.txt` for everyone.
+- README ownership and final wording: my draft lives on `no-lora`; agree with Divya before merging so `main` has no conflicting edits. The course requires setup steps, the command for each table and figure, and a note on which results need a GPU.
 - Contribution statement in the final report must match what each person actually did.
 
 **Track B (personal, after the course requirement is covered):** run E3 myself, the text-only and blank-image baselines, E4, 81/729-token variants, shuffled-image control, video-frame experiments. Use my own credits and be honest about attribution (team work vs. my own).
 
 **Portfolio angle (image/video generation roles):** a VLM is on the understanding side. Bridges: checking whether generated images match prompts (POPE-style hallucination testing), recaptioning and data curation, video-frame questions, rigorous evaluation. Pair with the diffusion projects already in progress.
 
-## 5. Infrastructure state (done)
+## 6. Infrastructure state (done)
 - **GCP project created**, billing linked, **$100 credit applied** (a second coupon may raise this to $200).
 - **Budget alert:** target $100 for now, multiple thresholds. **To do: raise the target to $200 when the second coupon is applied.** Alerts only send email; they do not stop spending.
 - **APIs enabled:** Agent Platform API (the new name for Vertex AI), Compute Engine.
@@ -66,9 +119,8 @@ Agreements to make with the LoRA half (not yet done):
   - Ignore all "serving", "restricted image training" and "committed" rows.
 - **Bucket:** `small_vlm`, us-central1 (Iowa), Standard, not public, soft delete on.
 - **Region rule: everything stays in us-central1** (Vertex jobs, VMs in zones like us-central1-a/b/c/f, any other storage). Cross-region traffic costs money; downloading to a laptop costs egress.
-- **GitHub repo:** `small-vlm` (private), cloned locally. Structure: `src/`, `configs/`, `scripts/`, `tests/`, `eval/`, `docs/`, `runs.csv`. `.gitignore` excludes data, checkpoints, weights, credentials.
 
-## 6. Evaluation design
+## 7. Evaluation design
 **Metrics**
 - ScienceQA-IMG: multiple-choice accuracy.
 - TextVQA (val): VQA accuracy.
@@ -89,14 +141,14 @@ Agreements to make with the LoRA half (not yet done):
 
 **What the benchmarks miss:** POPE checks only yes/no object existence (not attributes, counts, relations, or free-form descriptions); ScienceQA can be partly solved from text priors.
 
-## 7. Cost plan
+## 8. Cost plan
 - **Prices (check the current pricing page):** abstract used ~$4.43/hr for an on-demand A100 on Vertex (includes management fee); the course sheet lists ~$3.67 on-demand and ~$1.80 spot for a2-highgpu-1g; L4 ~$0.71/hr on-demand. Spot with checkpoints can roughly halve cost.
 - **Estimates (unmeasured until the 10K pilot):** E1 6-9 GPU-h, E2 5-8, E3 6-8, evaluation of ~4 models 8-12, dev and pilots 10-15 (L4).
   - Track A (E1 + E2 + pilots): ~$60-85 on-demand, ~$30-45 spot.
   - Full core plan: ~$125-175 on-demand, ~$65-95 spot.
 - **Rules:** debug on Colab or the L4 VM, use the A100 only for pilots and real runs; spot with checkpoints to Cloud Storage at least every 30 min (test resume first); stop idle VMs (a forgotten A100 costs ~$88/day); keep a 20% reserve; log every kept run in `runs.csv` (GPU, wall-clock, peak memory, dollars, commit).
 
-## 8. Course deadlines
+## 9. Course deadlines
 | Date | Item |
 |---|---|
 | Week of Nov 18 | Optional TA checkpoint (15 min, ungraded). Bring a one-page status note: what runs end to end, first results, credits spent, main open problem. |
@@ -106,7 +158,7 @@ Agreements to make with the LoRA half (not yet done):
 
 No late days on any project deliverable. Running out of credits does not extend deadlines.
 
-## 9. My calendar (one-person-friendly)
+## 10. My calendar (one-person-friendly)
 | Dates | Goal |
 |---|---|
 | Nov 19-20 | Connector, model assembly, data code, shape tests, overfit 100 examples, 10K pilot |
@@ -119,24 +171,26 @@ No late days on any project deliverable. Running out of credits does not extend 
 
 Draft Method and Experimental Setup while E1 trains.
 
-## 10. How we work together
+## 11. How we work together
 - **I write all the code myself; Claude guides and reviews.** Each task comes with a goal, hints and a test that must pass. I search docs first and ask only when stuck.
 - **One task per message.** Paste only the one function and the exact error, not whole files.
 - **Start a new chat per phase** and paste this file plus `docs/NOTES.md`.
 - **Keep `docs/NOTES.md` updated after every decision or run.**
 
-## 11. Task list
-1. **Pooling and projector** (`src/connector.py`) **<- current task**
+## 12. Task list
+**Setup (done):** GCP, bucket, shared repo and branch, venv, pinned requirements, editable install.
+
+1. **Pooling and projector** (`src/small_vlm/connector.py`) **<- current task**
    - Pooling function: `[B, 729, 1152]` -> reshape to 27x27 grid -> pool -> flatten to `[B, N, 1152]`. Hints: `reshape`, `permute`, `F.avg_pool2d`, `F.adaptive_avg_pool2d`.
    - Projector `nn.Module`: Linear 1152->896, GELU, Linear 896->896.
-   - Test in `tests/test_connector.py`: `torch.randn(2, 729, 1152)` through both gives `[2, N, 896]` for the chosen N. Run with `pytest` on laptop CPU.
-2. **Model assembly** (`src/model.py`): frozen encoder (bf16, `no_grad`), connector, Qwen LLM; splice visual tokens into the text embeddings at the image placeholder; unit test that the number of visual tokens equals the number of placeholders.
-3. **Data** (`src/data.py`): dataset, Qwen chat template, image placeholder, **loss masking on assistant tokens only**; decode a batch and inspect by eye.
+   - Test in `tests/test_connector.py`: `torch.randn(2, 729, 1152)` through both gives `[2, N, 896]` for the chosen N. Run with `pytest` from the repo root on laptop CPU.
+2. **Model assembly** (`src/small_vlm/model.py`): frozen encoder (bf16, `no_grad`), connector, Qwen LLM; splice visual tokens into the text embeddings at the image placeholder; unit test that the number of visual tokens equals the number of placeholders.
+3. **Data** (`src/small_vlm/data.py`): dataset, Qwen chat template, image placeholder, **loss masking on assistant tokens only**; decode a batch and inspect by eye.
 4. **Training loop** (`scripts/train.py`): gradient checkpointing on the LLM, bf16, checkpoint to Cloud Storage every <=30 min with working resume, logging of loss, throughput, peak memory.
 5. **Validate:** overfit 100 examples to near-zero loss, then run the 10K pilot and record real GPU-hours and memory.
 6. **E1 on Vertex (spot)**, push the checkpoint plus README to `small_vlm`, then **E2** from the same checkpoint.
 7. **Evaluation harness** (lmms-eval wrapper or own): text-only baseline first, then the VLM; per-sample outputs; format-failure rates; POPE breakdowns; blank-image run; latency, throughput and peak memory.
 8. **Analysis and deliverables.**
 
-## 12. Prompt to start the next chat
-> I'm working on a COMS 4995 group project (small VLM, Team 14). Attached are `small-vlm-project.md` and `docs/NOTES.md`. I'm writing the code myself and want guidance, not full solutions. We are on Task 1 (pooling and projector). Keep replies short and one task at a time.
+## 13. Prompt to start the next chat
+> I'm working on a COMS 4995 group project (small VLM, Team 14). Attached are `small-vlm-project.md` and `docs/NOTES.md`. I'm writing the code myself and want guidance, not full solutions. Setup is done (shared repo `Frozen-VLM-Benchmark`, branch `no-lora`, Python 3.11 venv, editable install). We are on Task 1 (pooling and projector, `src/small_vlm/connector.py`). Keep replies short and one task at a time.
