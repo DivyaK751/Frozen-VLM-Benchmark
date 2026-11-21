@@ -1,0 +1,1 @@
+run_id,date,purpose,gpu_type,machine,spot,wall_clock_hours,peak_mem_gb,cost_usd,git_commit,notes
