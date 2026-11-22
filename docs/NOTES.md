@@ -53,11 +53,12 @@ pytest
 ## Decisions
 | Date | Decision | Reason |
 |---|---|---|
-| Nov 19 | I write all code myself, Claude guides | Learning and interview readiness |
-| Nov 19 | My half = without-LoRA end to end (E1, E2, eval harness) | Team split |
-| Nov 19 | Work in Divya's repo `Frozen-VLM-Benchmark` on branch `no-lora` | Team repo |
-| Nov 19 | `venv` + Python 3.11 + pinned `requirements.txt` | Avoid Python/package version mismatches between machines |
-| Nov 19 | `src/` layout with package `small_vlm`, `pip install -e .` | Imports work from any folder |
+| Nov 21 | I write all code myself, Claude guides | Learning and interview readiness |
+| Nov 21 | My half = without-LoRA end to end (E1, E2, eval harness) | Team split |
+| Nov 21 | Work in Divya's repo `Frozen-VLM-Benchmark` on branch `no-lora` | Team repo |
+| Nov 21 | `venv` + Python 3.11 + pinned `requirements.txt` | Avoid Python/package version mismatches between machines |
+| Nov 21 | `src/` layout with package `small_vlm`, `pip install -e .` | Imports work from any folder |
+| Nov 22 | Schedule re-planned: Tasks 1-4 by Nov 25, E1 launch ~Nov 26-27, slides Dec 8 | Setup took longer than planned |
 | | Pooling: **TBD** (13x13 = 169 tokens, or 14x14 = 196 tokens) | |
 | | Stage 1 LR / batch size: **TBD** (start ~1e-3, ~256) | |
 | | Seed: **TBD** | |
@@ -88,7 +89,6 @@ pytest
 - [ ] Re-run the SigLIP and Qwen shape check inside the venv (optional, ~5 GB cache)
 - [ ] Raise budget target to $200 when the second coupon is applied
 - [ ] Optional: request on-demand A100 training quota (backup for preempted runs)
-- [ ] Optional: book the TA checkpoint (week of Nov 18)
 - [ ] Once confirmed everything is in the shared repo: decide whether to archive the old `small-vlm` repo and delete the old local folder
 
 ## Run log (also record each kept run in `runs.csv`)

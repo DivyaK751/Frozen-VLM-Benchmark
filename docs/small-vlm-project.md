@@ -1,6 +1,6 @@
 # Small VLM Project: Master Context
 
-Paste this file at the start of a new chat, together with `docs/NOTES.md`. Last updated: Nov 19, 2026.
+Paste this file at the start of a new chat, together with `docs/NOTES.md`. Last updated: Nov 22, 2026.
 
 ## 1. Project in brief
 - **Course:** COMS 4995, Foundation Model Engineering, Fall 2026. Group project, Team 14, Idea #13 (Building a small vision-language model).
@@ -151,7 +151,7 @@ Agreements to make with the LoRA half (not yet done):
 ## 9. Course deadlines
 | Date | Item |
 |---|---|
-| Week of Nov 18 | Optional TA checkpoint (15 min, ungraded). Bring a one-page status note: what runs end to end, first results, credits spent, main open problem. |
+| Week of Nov 18 | Optional TA checkpoint (15 min, ungraded). That week has passed; skip it unless the TA offers another slot. |
 | Dec 8 | Slides due (frozen after) |
 | Dec 9 | Presentation in class (10 min + 3 min questions; every member speaks) |
 | Dec 18 | Final report (6-8 pages, NeurIPS template) + frozen GitHub repo with README. Also: contribution statement, AI-use disclosure, confidential peer evaluation. |
@@ -161,11 +161,12 @@ No late days on any project deliverable. Running out of credits does not extend 
 ## 10. My calendar (one-person-friendly)
 | Dates | Goal |
 |---|---|
-| Nov 19-20 | Connector, model assembly, data code, shape tests, overfit 100 examples, 10K pilot |
-| Nov 21-24 | Launch E1 on spot; build the evaluation harness while it trains |
-| Nov 25-29 | E2 (E3 by the LoRA half); validate the harness on a pilot checkpoint |
-| Nov 30-Dec 3 | Score all models, blank-image run, POPE breakdowns, manual check of ~50 outputs |
-| Dec 4-7 | Plots, tables, slides |
+| Nov 22-25 | Tasks 1-4: connector, model assembly, data code, training loop, shape tests |
+| Nov 26-27 | Overfit 100 examples, 10K pilot (real GPU-hours), launch E1 on spot |
+| Nov 27-30 | E1 trains; build the evaluation harness meanwhile; push E1 checkpoint for the LoRA half |
+| Dec 1-3 | E2 from E1; validate the harness on a pilot checkpoint |
+| Dec 3-6 | Score all models, blank-image run, POPE breakdowns, manual check of ~50 outputs |
+| Dec 7 | Plots, tables, slides (due Dec 8) |
 | Dec 9 | Presentation |
 | Dec 10-18 | Report, repo freeze, README, disclosures, peer evaluation |
 
