@@ -1,6 +1,6 @@
 # Small VLM Project: Master Context
 
-Paste this file at the start of a new chat, together with `docs/NOTES.md`. Last updated: Nov 22, 2026.
+Paste this file at the start of a new chat, together with `docs/NOTES.md`. Last updated: Nov 22, 2026 (Task 1 complete, Task 2 next).
 
 ## 1. Project in brief
 - **Course:** COMS 4995, Foundation Model Engineering, Fall 2026. Group project, Team 14, Idea #13 (Building a small vision-language model).
@@ -12,19 +12,26 @@ Paste this file at the start of a new chat, together with `docs/NOTES.md`. Last 
   - H2: Projector-only hallucinates more (lower POPE F1, higher "yes" rate), with the largest gap on the adversarial split.
   - H3: Blanking the image lowers TextVQA and POPE far more than ScienceQA, and the drop is smaller for projector-only (more reliance on language priors).
 
-## 2. Architecture (from the abstract)
-Image (384 px) -> frozen SigLIP 2 So400m (`google/siglip2-so400m-patch14-384`) -> pooling -> 2-layer MLP projector with GELU, 1152 -> 896 (trained) -> Qwen2.5-0.5B-Instruct, which reads the visual tokens then the text prompt and generates the answer.
+## 2. Architecture
+Image (384 px) -> frozen SigLIP 2 So400m (`google/siglip2-so400m-patch14-384`) -> **pooling (27x27 -> 14x14, 196 tokens)** -> 2-layer MLP projector with GELU, 1152 -> 896 (trained) -> Qwen2.5-0.5B-Instruct, which reads the visual tokens then the text prompt and generates the answer.
 
 **Verified on Colab (Colab's own package versions, not the pinned ones):**
 - Vision encoder output: `[1, 729, 1152]` (27x27 grid). Vision tower is 428.2M params.
 - LLM: 494.0M params, hidden size 896.
 - Neither model is gated (no Hugging Face token needed).
-- **To do:** re-run this shape check inside the pinned venv before the first real run (optional download of ~5 GB into the Hugging Face cache).
+- **To do:** re-run this shape check inside the pinned venv before the first real run (optional download of ~5 GB into the Hugging Face cache). Task 2 will need this anyway.
 
-**Open decision: pooling.** 27 is odd, so 2x2 pooling is not clean.
-- `avg_pool2d(kernel=2)` -> 13x13 = 169 tokens (drops the last row and column).
-- `adaptive_avg_pool2d` to 14x14 -> 196 tokens (keeps everything).
-- Pick one, record the reason in `docs/NOTES.md`, and write a shape test.
+**Decided (Nov 22): pooling = `adaptive_avg_pool2d` to 14x14 = 196 visual tokens per image, applied before the projector.**
+- Reason: keeps every patch. `avg_pool2d(kernel=2)` would give 13x13 = 169 tokens but drops the last row and column (~7% of patches, always the bottom/right edge), a systematic crop that could confound TextVQA and POPE. Cost: ~16% more tokens than 169.
+- Caveat for the report: adaptive windows are uneven (2 or 3 patches wide, overlapping), so some output tokens average more patches than others.
+- Pooling first means the projector runs on 196 tokens instead of 729 (cheaper).
+- E1 and E3 inherit this choice; changing it later means retraining E1.
+- Output size is a function argument, so the 81- and 729-token variants (Track B) are a config change.
+
+**Connector interface (done, in `src/small_vlm/connector.py`):**
+- `pool_visual_tokens(tokens, grid_size=27, output_size=14)`: `[B, grid_size**2, C] -> [B, output_size**2, C]`. Asserts the token count equals `grid_size**2`.
+- `VisualProjector(in_dim=1152, out_dim=896)`: `fc1` (in_dim -> out_dim), `act` (GELU), `fc2` (out_dim -> out_dim). `[B, N, in_dim] -> [B, N, out_dim]`. **1,836,800 parameters.** Layer names `fc1`/`act`/`fc2` give readable `state_dict` keys for the E1 checkpoint.
+- Tests in `tests/test_connector.py` (5 pass): pooling shape, constant preserved, identity pooling (`output_size=27`) preserves values and positions, connector output shape `[2, 196, 896]`, parameter count 1,836,800.
 
 ## 3. Repository and environment
 
@@ -41,18 +48,18 @@ Frozen-VLM-Benchmark/
   pyproject.toml        # package metadata, requires Python >=3.11,<3.12, src layout
   requirements.txt      # exact pinned versions (pip freeze, 74 lines)
   runs.csv              # one row per kept run: GPU, hours, peak memory, dollars, commit
-  src/small_vlm/        # the importable package (connector.py, model.py, data.py go here)
+  src/small_vlm/        # the importable package (connector.py done; model.py, data.py next)
   configs/  scripts/  tests/  eval/  docs/
   .gitignore            # excludes .venv, data, checkpoints, weights, credentials
 ```
-Imports look like `from small_vlm.connector import ...`. **Paths in the task list below use this layout.**
+Imports look like `from small_vlm.connector import pool_visual_tokens, VisualProjector`. **Paths in the task list below use this layout.**
 
 ### Environment (identical on every machine)
 - **Python 3.11** (laptop: 3.11.8). Same minor version on laptop, VM and Vertex container. Record the exact patch version in `docs/NOTES.md`.
 - **Virtual environment:** `venv` in `.venv/` inside the repo (not conda). `venv` reuses an installed Python, so install Python 3.11 first.
 - **Editable install:** `pip install -e .` puts a pointer to `src/small_vlm` in site-packages, so `import small_vlm` works from any folder and edits take effect immediately. Verified: it resolves to the repo's `src/small_vlm/__init__.py`.
 - **Pinned versions** (from `requirements.txt`): torch 2.15.0 (CPU build on the laptop), torchvision 0.29.2, transformers 5.24.0 (new major version, differs from Colab), accelerate 1.16.0, peft 0.22.0, datasets 5.2.0, numpy 2.4.6, pandas 3.1.1, scipy 1.17.1, pillow 13.0.0, pytest 9.2.0, google-cloud-storage 3.17.1, plus tqdm, pyyaml and transitive dependencies.
-- **Verified:** imports of torch, transformers, peft, datasets, accelerate succeed with these versions; `pytest --version` works.
+- **Verified:** imports of torch, transformers, peft, datasets, accelerate succeed with these versions; `pytest` runs (`python -m pytest tests/test_connector.py` passes on Python 3.11.8).
 
 ### Setup for a teammate (Windows, Git Bash)
 ```bash
@@ -74,6 +81,7 @@ pytest
 - `requirements.txt` was frozen on Windows. A Windows-only package could fail on Linux: if `pip install -r` errors on one, remove that line and note it here.
 - On a Linux GPU VM, check `torch.cuda.is_available()` on the cheap L4 VM before any A100 spend. The torch version stays the same; only the build (CPU vs. CUDA) differs.
 - When adding a package: install it in the venv, then regenerate with `pip freeze --exclude-editable > requirements.txt`, and tell the team.
+- transformers 5.24.0 is a new major version and differs from the Colab check. Read the docs for the pinned version before relying on remembered APIs (especially for SigLIP 2 loading and chat templates).
 
 ## 4. Training plan
 | Run | What trains | Data | Notes |
@@ -102,6 +110,7 @@ Agreements to make with the LoRA half (not yet done):
 - Same Python 3.11 and the same `requirements.txt` for everyone.
 - README ownership and final wording: my draft lives on `no-lora`; agree with Divya before merging so `main` has no conflicting edits. The course requires setup steps, the command for each table and figure, and a note on which results need a GPU.
 - Contribution statement in the final report must match what each person actually did.
+- **Tell the LoRA half the pooling decision (196 tokens, adaptive) and the connector interface, since E3 inherits both.**
 
 **Track B (personal, after the course requirement is covered):** run E3 myself, the text-only and blank-image baselines, E4, 81/729-token variants, shuffled-image control, video-frame experiments. Use my own credits and be honest about attribution (team work vs. my own).
 
@@ -161,7 +170,7 @@ No late days on any project deliverable. Running out of credits does not extend 
 ## 10. My calendar (one-person-friendly)
 | Dates | Goal |
 |---|---|
-| Nov 22-25 | Tasks 1-4: connector, model assembly, data code, training loop, shape tests |
+| Nov 22-25 | Tasks 1-4: connector (**Task 1 done Nov 22**), model assembly, data code, training loop, shape tests |
 | Nov 26-27 | Overfit 100 examples, 10K pilot (real GPU-hours), launch E1 on spot |
 | Nov 27-30 | E1 trains; build the evaluation harness meanwhile; push E1 checkpoint for the LoRA half |
 | Dec 1-3 | E2 from E1; validate the harness on a pilot checkpoint |
@@ -174,18 +183,33 @@ Draft Method and Experimental Setup while E1 trains.
 
 ## 11. How we work together
 - **I write all the code myself; Claude guides and reviews.** Each task comes with a goal, hints and a test that must pass. I search docs first and ask only when stuck.
+- **Purpose first:** at the start of each task, Claude explains the purpose in plain English with a diagram before any implementation. No jumping ahead; one step at a time, and I confirm before moving on.
 - **One task per message.** Paste only the one function and the exact error, not whole files.
 - **Start a new chat per phase** and paste this file plus `docs/NOTES.md`.
-- **Keep `docs/NOTES.md` updated after every decision or run.**
+- **NOTES.md is updated at the end of each task** (batched, not after every step): Claude provides ready-to-paste entries and the updated files at that point. Decisions and surprises still get recorded then, with dates.
+- Expected values in tests (such as parameter counts) are derived from a formula or from the code, not from memory. Lesson from Task 1: a hand-computed count was wrong, the test caught it.
 
 ## 12. Task list
-**Setup (done):** GCP, bucket, shared repo and branch, venv, pinned requirements, editable install.
+**Setup (done Nov 21-22):** GCP, bucket, shared repo and branch, venv, pinned requirements, editable install.
 
-1. **Pooling and projector** (`src/small_vlm/connector.py`) **<- current task**
-   - Pooling function: `[B, 729, 1152]` -> reshape to 27x27 grid -> pool -> flatten to `[B, N, 1152]`. Hints: `reshape`, `permute`, `F.avg_pool2d`, `F.adaptive_avg_pool2d`.
-   - Projector `nn.Module`: Linear 1152->896, GELU, Linear 896->896.
-   - Test in `tests/test_connector.py`: `torch.randn(2, 729, 1152)` through both gives `[2, N, 896]` for the chosen N. Run with `pytest` from the repo root on laptop CPU.
-2. **Model assembly** (`src/small_vlm/model.py`): frozen encoder (bf16, `no_grad`), connector, Qwen LLM; splice visual tokens into the text embeddings at the image placeholder; unit test that the number of visual tokens equals the number of placeholders.
+1. **Pooling and projector** (`src/small_vlm/connector.py`) **DONE Nov 22**
+   - `pool_visual_tokens` (adaptive pooling to 14x14, 196 tokens) and `VisualProjector` (1152 -> 896 -> 896, GELU, 1,836,800 parameters).
+   - 5 tests pass in `tests/test_connector.py`.
+   - To confirm: committed and pushed on `no-lora`.
+2. **Model assembly** (`src/small_vlm/model.py`) **<- current task**
+   - Goal: frozen SigLIP 2 encoder (bf16, `no_grad`) -> `pool_visual_tokens` -> `VisualProjector` -> splice visual tokens into the Qwen text embeddings at the image placeholder -> Qwen forward.
+   - Unit test: the number of visual tokens spliced in equals the number of image placeholders times 196; output shapes are right on CPU with tiny dummy inputs.
+   - **Decisions to settle at the start of Task 2 (record in NOTES.md):**
+     - Image placeholder mechanism: a new special token (for example `<image>`, which means resizing the Qwen embeddings) or an existing token. Check the pinned transformers docs.
+     - How one placeholder expands into 196 embedding slots (and how attention mask and labels stay aligned; visual positions get label -100 in Task 3).
+     - dtype of the projector and LLM (bf16 vs. fp32 master weights for the projector).
+     - How to load only the SigLIP 2 vision tower in the pinned transformers version (the full checkpoint also contains a text tower).
+   - **Gotchas to keep in mind:**
+     - Encoder: `torch.no_grad()` and `requires_grad_(False)`, `eval()` mode.
+     - LLM is frozen in E1 and E2 but **must not be wrapped in `no_grad`**: gradients still have to flow back through it to reach the projector. Freeze with `requires_grad_(False)` only.
+     - Only the projector's parameters should have `requires_grad=True`. Add a test that counts trainable parameters (expect 1,836,800).
+     - Check the gradient-checkpointing plus frozen-embeddings behaviour in the docs before Task 4.
+     - Task 2 needs the real models for a shape check; use the optional ~5 GB download, or test with tiny random-weight configs first.
 3. **Data** (`src/small_vlm/data.py`): dataset, Qwen chat template, image placeholder, **loss masking on assistant tokens only**; decode a batch and inspect by eye.
 4. **Training loop** (`scripts/train.py`): gradient checkpointing on the LLM, bf16, checkpoint to Cloud Storage every <=30 min with working resume, logging of loss, throughput, peak memory.
 5. **Validate:** overfit 100 examples to near-zero loss, then run the 10K pilot and record real GPU-hours and memory.
@@ -194,4 +218,4 @@ Draft Method and Experimental Setup while E1 trains.
 8. **Analysis and deliverables.**
 
 ## 13. Prompt to start the next chat
-> I'm working on a COMS 4995 group project (small VLM, Team 14). Attached are `small-vlm-project.md` and `docs/NOTES.md`. I'm writing the code myself and want guidance, not full solutions. Setup is done (shared repo `Frozen-VLM-Benchmark`, branch `no-lora`, Python 3.11 venv, editable install). We are on Task 1 (pooling and projector, `src/small_vlm/connector.py`). Keep replies short and one task at a time.
+> I'm working on a COMS 4995 group project (small VLM, Team 14). Attached are `small-vlm-project.md` and `docs/NOTES.md`. Treat them as the source of truth. I'm writing the code myself and want guidance, not full solutions. Task 1 is done (pooling = adaptive 14x14, 196 tokens; `pool_visual_tokens` and `VisualProjector` in `src/small_vlm/connector.py`; 5 tests pass). We are on Task 2: model assembly in `src/small_vlm/model.py`. First explain the purpose of Task 2 in plain English with a diagram, and wait for me to confirm before the goal, hints and test. Keep replies short, one step at a time, and give me the updated NOTES.md entries at the end of the task.
