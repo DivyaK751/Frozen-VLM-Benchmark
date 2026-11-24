@@ -138,6 +138,38 @@ format_example(conversation, stage, text_only=False) -> {"input_ids": [...], "la
 1. Train on the 100 examples for a few hundred steps. The loss should fall close to 0. If it doesn't, check the loss masks, image-token positions and chat template.
 2. **Image check:** after it has memorized the examples, shuffle the images between examples. The loss should rise clearly. If it doesn't, the model isn't using the image.
 
+**D6 results (done 2026-11-24).** The code is in `src/data/dataset.py`:
+
+```python
+from src.data.dataset import VLMDataset, load_bad_images
+ds = VLMDataset("data/pilot/stage2_overfit_100.json", "data/pilot/images/stage2", stage=2,
+                format_fn=None,          # None = temporary stub; later Lakshya's format_example
+                text_only=False,         # True for E0 / no-image test (no pixel_values)
+                bad_images=load_bad_images("data/processed/bad_images.json"))
+ds[0]  # {"pixel_values": [3,384,384], "input_ids": [L], "labels": [L]}
+```
+
+- **Image tokens confirmed in the Qwen tokenizer:** `<|vision_start|>` = 151652, `<|image_pad|>` = 151655, `<|vision_end|>` = 151653. Each is a single token, so no new tokens are needed. The pad token is `<|endoftext|>` = 151643.
+- **Stand-in formatter:** `src/data/formatting_stub.py` has the same interface as Lakshya's `format_example` and follows the agreed format. The Dataset prints a warning while it is in use. **Swap:** pass `format_fn=format_example` once L3–L7 are done.
+- **Bad images:**
+  - Images listed in the D4 bad-image log are dropped up front.
+  - If an image still fails at runtime, the Dataset warns and uses another random example.
+  - After 10 failures in a row it stops with an error, which catches a wrong `image_dir`.
+
+| Test (overfit sets) | Stage 1 | Stage 2 |
+|---|---|---|
+| `pixel_values` shape | [3, 384, 384] | [3, 384, 384] |
+| Image tokens per example | 169 (all) | 169 (all) |
+| Sequence length min / median / max | 202 / 213 / 238 | 279 / 353 / 781 |
+| Share of tokens trained on | 6% (caption only) | 44% (answers only) |
+| Image tokens ever trained on | No | No |
+| Time per example (laptop) | 5 ms | 5 ms |
+
+- `text_only=True` returns no `pixel_values` and 0 image tokens.
+- A bad-image entry drops exactly 1 example.
+- A wrong `image_dir` raises a clear error.
+- The sequences are well below the 2048 maximum. Stage 1 is mostly image tokens.
+
 **D2 results (done 2026-11-24).** The full training data is in `gs://frozen-vlm-benchmark/raw/` (project `encouraging-art-515701-r8`, region `us-central1`). The zips are stored unextracted.
 
 | Bucket path | Size | Contents | Check |
