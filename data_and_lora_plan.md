@@ -4,13 +4,15 @@
 
 **Parts covered:** Part 1 (data pipeline) and Part 2 (LoRA)
 
-**Depends on us:** Ritwik and Vinod (projector, eval pipeline)
+**Used by:** Ritwik and Vinod (projector, eval pipeline)
+
+**How we work:** we build both parts on our own, with no waiting on the other team. We set the formats ourselves (see [Image-token format](#image-token-format-our-decision)), and Ritwik and Vinod build on what we hand over. When a design choice is unclear, follow [abstract.md](abstract.md).
 
 ---
 
 ## Part 1: Data pipeline
 
-**Goal:** turn raw datasets into batches the model can train on, and give the projector and eval teams a clear agreed format for those batches.
+**Goal:** turn raw datasets into batches the model can train on, in a fixed format that the projector and eval code can build on.
 
 ### Steps
 
@@ -22,7 +24,7 @@
 3. **Convert to Qwen's chat format.** LLaVA data looks like `{"human": "<image>\nWhat is...", "gpt": "..."}`, and it needs to become Qwen's `<|im_start|>user ... <|im_end|>` template.
    - Stage 1 becomes: user = image + "Describe the image", assistant = caption.
    - Stage 2 keeps its multi-turn conversations as they are.
-4. **Expand the image placeholder.** Replace each `<image>` with **169 copies of a special image token**. The model later swaps these positions for the projector's output. Agree on this format with Ritwik and Vinod early.
+4. **Expand the image placeholder.** Replace each `<image>` with **169 copies of a special image token**. The model later swaps these positions for the projector's output. We fix this format ourselves (see [Image-token format](#image-token-format-our-decision)).
 5. **Build loss masks.** Training should only score the assistant's words, so every system, user and image token gets label `-100`. A mistake here is the most common silent bug.
 6. **Preprocess images** with the SigLIP processor: resize to 384 px and normalize.
 7. **Write the Dataset and collator.** They handle tokenization, truncation to a maximum length (about 2048 tokens), padding and batching. Each batch contains:
@@ -45,12 +47,12 @@
 | 1. Download and store in Google Cloud Storage | 2–3 h | Plus **3–8 h of background waiting** for about 45 GB of images. The fastest route is to download onto a cloud VM and copy straight to the bucket, not through a laptop. |
 | 2. Remove POPE overlap | 1–2 h | Simple ID matching once the files are in place. |
 | 3. Convert to Qwen chat format | 2–3 h | Mostly reading the LLaVA JSON and Qwen's chat template. |
-| 4. Expand the image token | 2–4 h | Includes agreeing on the format with the projector team. Can take longer if you go back and forth. |
+| 4. Expand the image token | 1–2 h | The format is fixed below, so this is mostly implementation. |
 | 5. Loss masks | 2–4 h | Easy to write, but slow to get right, and checking it carefully is worth the time. |
 | 6. Image preprocessing | 1 h | The SigLIP processor does most of the work. |
 | 7. Dataset and collator | 3–5 h | Padding, truncation and batching, plus testing on real batches. |
 | Debugging buffer | 2–3 h | Something always breaks, such as corrupt images, overly long conversations or tokenizer edge cases. |
-| **Total** | **15–25 h** | About 3–5 working days for one person; about 2–3 days with two people working in parallel. |
+| **Total** | **14–23 h** | About 3–5 working days for one person; about 2–3 days with two people working in parallel. |
 
 **Ways to save time:**
 - Start the downloads on day 1 and write the code while they run.
@@ -83,12 +85,12 @@ format_example(conversation, stage, text_only=False) -> {"input_ids": [...], "la
 | D7 | **Collator and `get_dataloader`**: pad `input_ids` with the pad token, pad `labels` with `-100`, build `attention_mask`, and stack the images | 7 | A batch of 8 loads with the right shapes | 1–2 h |
 | D8 | **Data sanity checks**: example counts per stage, image check on 20 random samples, and a time-to-load-one-batch measurement | 9 | Short notes added to this file | 1 h |
 
-#### Lakshya: text and tokens (about 8–14 h)
+#### Lakshya: text and tokens (about 7–13 h)
 
 | # | Task | Covers step | Done when | Time |
 |---|---|---|---|---|
-| L1 | **Agree on the image-token format** with Ritwik and Vinod: the token name (e.g. `<image>`), the fact that it is repeated 169 times, and where it goes in the prompt | 4 | The format is written below in this file and all three tracks have signed off | 1–2 h |
-| L2 | **Add the image token** to the Qwen tokenizer as a special token and record its ID | 4 | The tokenizer encodes `<image>` as a single ID | 0.5 h |
+| L1 | **Lock the image-token format**: load the Qwen tokenizer, confirm that `<\|vision_start\|>`, `<\|image_pad\|>` and `<\|vision_end\|>` exist, and record their IDs in the format section below | 4 | The token IDs are filled in below | 0.5 h |
+| L2 | **Put the format in code**: one `config.py` with `NUM_IMAGE_TOKENS = 169`, the token IDs, the system prompt and `MAX_LEN = 2048`, so the format is set in a single place | 4 | Both tracks import the constants from `config.py` | 0.5 h |
 | L3 | **Chat formatting**: convert LLaVA conversations to Qwen's chat template. Stage 1 is "Describe the image" plus the caption; Stage 2 is multi-turn | 3 | 5 pilot examples printed as text look correct | 2–3 h |
 | L4 | **Image-token expansion**: replace each `<image>` with 169 image tokens | 4 | Every tokenized example contains exactly 169 image-token IDs | 1–2 h |
 | L5 | **Loss masks**: set labels to `-100` for system, user and image tokens and keep labels only on assistant replies | 5 | Decoding only the unmasked labels shows assistant text and nothing else | 2–4 h |
@@ -100,7 +102,7 @@ format_example(conversation, stage, text_only=False) -> {"input_ids": [...], "la
 
 | Day | Divya | Lakshya |
 |---|---|---|
-| 1 | D1 (pilot download), start D2 (full downloads run in background) | L1 (meet the projector team), L2 |
+| 1 | D1 (pilot download), start D2 (full downloads run in background) | L1 (lock the token format), L2 (`config.py`) |
 | 2 | D3 (POPE overlap), D4 (image preprocessing), D5 (subsets) | L3 (chat formatting), L4 (token expansion) |
 | 3 | D6 (Dataset class, using a stub `format_example` until L5 is done) | L5 (loss masks), L6 (truncation) |
 | 4 | D7 (collator and `get_dataloader`), D8 | L7 (text-only), L8 |
@@ -108,14 +110,27 @@ format_example(conversation, stage, text_only=False) -> {"input_ids": [...], "la
 
 **Final check (both):** one batch from the pilot loader, decoded back to text, shows the right image-token count, correct masks and the matching image.
 
-#### Agreed image-token format
+#### Image-token format (our decision)
 
-*To be filled in after L1.*
+We set this format. Ritwik and Vinod build their code against it.
 
-- Token string:
-- Token ID:
-- Tokens per image: 169
-- Position in the prompt:
+- **Image tokens:** `<|vision_start|>` + 169 × `<|image_pad|>` + `<|vision_end|>`. These reuse tokens already in the Qwen2.5 tokenizer, so no new tokens are added and the embeddings don't need resizing.
+- **Token IDs:** *fill in after L1*: `vision_start = ___`, `image_pad = ___`, `vision_end = ___`
+- **Tokens per image: 169.** SigLIP gives a 27×27 grid; 2×2 average pooling with stride 2 gives 13×13 = 169 (abstract.md §6). This is the single constant `NUM_IMAGE_TOKENS` in `config.py`, so changing it later is a one-line edit.
+- **Position:** the image comes at the start of the first user turn, before the question:
+  ```
+  <|im_start|>system\n{Qwen default system prompt}<|im_end|>
+  <|im_start|>user\n<|vision_start|><|image_pad|>×169<|vision_end|>\n{question}<|im_end|>
+  <|im_start|>assistant\n{answer}<|im_end|>
+  ```
+- **Batch contents:**
+  - `pixel_values` `[B, 3, 384, 384]`: raw images from the SigLIP processor. The model runs SigLIP itself; we don't precompute features.
+  - `input_ids`, `attention_mask` `[B, L]`: maximum length 2048.
+  - `labels` `[B, L]`: -100 everywhere except assistant replies.
+- **How the model uses it:** embed `input_ids`, then replace the positions where `input_ids == image_pad_id` with the projector output `[B, 169, 896]`.
+- **Modes of `format_example`:**
+  - `inference=True`: no answer; the prompt ends at `<|im_start|>assistant\n`. Used for eval.
+  - `text_only=True`: no image tokens. Used for E0 and the no-image test.
 
 ---
 
@@ -130,7 +145,8 @@ format_example(conversation, stage, text_only=False) -> {"input_ids": [...], "la
    - Target all 7 linear layers in each block: `q, k, v, o` (attention) and `gate, up, down` (MLP).
    - That gives about 8.8M trainable parameters, compared with about 1.8M for the projector.
 2. **Combine LoRA with the projector.**
-   - Load the Stage 1 projector checkpoint.
+   - To test without waiting for the projector team, build a small stand-in model from the abstract.md §6 spec: frozen SigLIP → 2×2 pooling → 2-layer MLP (1152 → 896, GELU, randomly initialized) → Qwen, using the image-token replacement described in the format section.
+   - For the real E3 runs, swap the stand-in projector for the Stage 1 projector checkpoint. The shapes are the same, so nothing else changes.
    - Trainable parameters are the projector plus LoRA. SigLIP and the base Qwen weights stay frozen.
    - Print the trainable parameter count to confirm this.
 3. **Use one config flag.** Something like `use_lora: true/false`, so that E2 and E3 share all other code and settings.
@@ -156,8 +172,10 @@ format_example(conversation, stage, text_only=False) -> {"input_ids": [...], "la
 
 | When | Data pipeline | LoRA |
 |---|---|---|
-| Week 1 | Steps 1–7; 10K pilot loader ready (this unblocks the projector team) | Steps 1–3, tested on dummy data |
+| Week 1 | Steps 1–7; 10K pilot loader ready | Steps 1–3, using the stand-in model and dummy data |
 | Week 2 | Steps 8–9; POPE overlap counts | Steps 4–7 on the pilot data |
 | Week 3 | Support the full runs | Full E3, E0 and rank-ablation runs |
 
-**Biggest dependency:** step 4 of the data pipeline, the image-token format. It decides how the projector's output is inserted into Qwen's input, and the data pipeline, LoRA and projector all depend on it. Agree on it with Ritwik and Vinod before writing steps 4, 5 and 7.
+**Handoff to Ritwik and Vinod:** once the pilot loader works, share `get_dataloader`, `format_example`, `config.py` and the [Image-token format](#image-token-format-our-decision) section. They build the projector and eval code on these.
+
+**The one input we need from them:** the full E3 runs start from the Stage 1 projector checkpoint. Until then, all LoRA work runs on the stand-in projector, so nothing is blocked.
