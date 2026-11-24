@@ -85,6 +85,45 @@ format_example(conversation, stage, text_only=False) -> {"input_ids": [...], "la
 | D7 | **Collator and `get_dataloader`**: pad `input_ids` with the pad token, pad `labels` with `-100`, build `attention_mask`, and stack the images | 7 | A batch of 8 loads with the right shapes | 1–2 h |
 | D8 | **Data sanity checks**: example counts per stage, image check on 20 random samples, and a time-to-load-one-batch measurement | 9 | Short notes added to this file | 1 h |
 
+**D1 results (done 2026-11-23).** Run with `python scripts/download_pilot.py` (seed 0). The output is in `data/pilot/`, which git ignores.
+
+| | Source size | Pilot examples | Images | Missing / corrupt | Size |
+|---|---|---|---|---|---|
+| Stage 1 | LLaVA-Pretrain: 558,128 | 10,000 | 10,000 | 0 / 0 | 498 MB |
+| Stage 2 | LLaVA-Instruct-150K: 157,712 | 10,000 | 9,627 unique | 0 / 0 | 1.58 GB |
+
+- Lakshya only needs `stage1_pilot_10k.json` (2.9 MB) and `stage2_pilot_10k.json` (13.8 MB). Running the script again with the same seed recreates the same pilot.
+- Hugging Face rate-limits users who aren't logged in (about 3,000 requests per 5 minutes). Run `hf auth login` (inside `.venv`) before D2.
+- POPE overlap was checked in D3: the pilot has none (see below).
+
+**D3 results (done 2026-11-24).** Run with `python scripts/check_pope_overlap.py`. The report is saved to `data/processed/pope_overlap.json`.
+
+| | Conversations | Unique images | Overlapping with POPE | Removed |
+|---|---|---|---|---|
+| POPE (`lmms-lab/POPE`, 9,000 questions) | — | 500 | — | — |
+| LLaVA-Instruct-150K (full) | 157,712 | 81,479 | **0** | 0 |
+| Stage 2 pilot (10K) | 10,000 | 9,627 | **0** | 0 |
+
+- **No filtering is needed.** Use the original `llava_instruct_150k.json` and the pilot as they are. LLaVA-Instruct is built from COCO train2014, and POPE uses val2014; the two never share images.
+- Checks run: COCO IDs parse as plain integers on both sides, both fall in COCO's ID range, and a known POPE ID (310196) is found.
+- **Still open:** the near-duplicate (perceptual-hash) check between POPE and the LLaVA-Pretrain images (LAION/CC/SBU). It needs all 558K images, so run it as a cloud job later.
+
+**D2 results (done 2026-11-24).** The full training data is in `gs://frozen-vlm-benchmark/raw/` (project `encouraging-art-515701-r8`, region `us-central1`). The zips are stored unextracted.
+
+| Bucket path | Size | Contents | Check |
+|---|---|---|---|
+| `raw/pretrain/blip_laion_cc_sbu_558k.json` | 180.5 MB | 558,128 examples | — |
+| `raw/pretrain/images.zip` | 27.36 GB | 558,128 images | 0 of 558,128 JSON images missing |
+| `raw/instruct/llava_instruct_150k.json` | 228.9 MB | 157,712 examples, 81,479 unique images | — |
+| `raw/coco/train2017.zip` | 19.34 GB | 118,287 images | md5 `cced6f7f71b7629ddf16f17bbcfab6b2` matches COCO; 0 of 81,479 JSON images missing |
+
+How it was done (to repeat later, e.g. for eval data):
+- The download ran on a temporary `e2-standard-4` VM in `us-central1-a`, using `hf download` for the Hugging Face files and `wget` for COCO, then `gcloud storage cp` to the bucket.
+- **The Columbia organization blocks public IPs on VMs** (`constraints/compute.vmExternalIpAccess`). Workaround: create the VM with `--no-address`, give it internet through a Cloud NAT (`nat-router` / `nat-config`), and SSH in with `--tunnel-through-iap` (firewall rule `allow-iap-ssh` for `35.235.240.0/20`).
+- Create the VM with `--scopes=cloud-platform`, or it can't write to the bucket.
+- The VM, NAT, router and firewall rule were deleted afterwards. Total cost was about $2–3; storage is about $0.90 per month.
+- Training jobs should copy the zips to local disk and extract them there, rather than reading individual files from the bucket.
+
 #### Lakshya: text and tokens (about 7–13 h)
 
 | # | Task | Covers step | Done when | Time |
