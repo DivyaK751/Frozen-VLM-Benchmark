@@ -108,6 +108,23 @@ format_example(conversation, stage, text_only=False) -> {"input_ids": [...], "la
 - Checks run: COCO IDs parse as plain integers on both sides, both fall in COCO's ID range, and a known POPE ID (310196) is found.
 - **Still open:** the near-duplicate (perceptual-hash) check between POPE and the LLaVA-Pretrain images (LAION/CC/SBU). It needs all 558K images, so run it as a cloud job later.
 
+**D4 results (done 2026-11-24).** The code is in `src/data/images.py`:
+
+| Function | What it does |
+|---|---|
+| `load_image(path)` | Opens a file path or file object and returns `(RGB image, None)`, or `(None, error)` for a missing, truncated or invalid file |
+| `preprocess(images)` | Runs the SigLIP processor and returns `pixel_values` `[N, 3, 384, 384]`, float32, in [-1, 1] |
+| `blank_image()` | Gray (128, 128, 128) 384×384 image for the blank-image test; about 0 after normalization |
+
+- **Decisions:**
+  - Stretch images to 384×384 (SigLIP's default), with no padding to square.
+  - Convert non-RGB images with `.convert("RGB")`, as LLaVA does.
+  - Use the slow PIL processor (`use_fast=False`) explicitly, so train and eval always match.
+- **SigLIP processor settings:** bilinear resize, rescale 1/255, mean and std 0.5. `do_convert_rgb` is unset, which is why `load_image` converts to RGB itself.
+- **Pilot check:** all 19,627 images load, with 0 bad. The originals were 19,551 RGB and 76 grayscale, and all 76 grayscale images convert correctly.
+- **Speed:** 3.1 ms per image on a laptop. That's about 30 CPU-minutes per Stage 1 epoch, so it won't slow the GPU down with 4–8 data-loading workers.
+- **Bad-image log:** `scripts/check_images.py` scans a folder or a zip directly, without extracting, and writes the bad files and their errors to JSON. Tested on a zip with a truncated JPEG and a non-image file: both were caught. **To do:** run it on the full `images.zip` and `train2017.zip` in the cloud before training, and have the D6 Dataset skip the files it lists.
+
 **D2 results (done 2026-11-24).** The full training data is in `gs://frozen-vlm-benchmark/raw/` (project `encouraging-art-515701-r8`, region `us-central1`). The zips are stored unextracted.
 
 | Bucket path | Size | Contents | Check |
