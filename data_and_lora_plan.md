@@ -125,6 +125,19 @@ format_example(conversation, stage, text_only=False) -> {"input_ids": [...], "la
 - **Speed:** 3.1 ms per image on a laptop. That's about 30 CPU-minutes per Stage 1 epoch, so it won't slow the GPU down with 4–8 data-loading workers.
 - **Bad-image log:** `scripts/check_images.py` scans a folder or a zip directly, without extracting, and writes the bad files and their errors to JSON. Tested on a zip with a truncated JPEG and a non-image file: both were caught. **To do:** run it on the full `images.zip` and `train2017.zip` in the cloud before training, and have the D6 Dataset skip the files it lists.
 
+**D5 results (done 2026-11-24).** Run with `python scripts/make_subsets.py` (seed 0). The 100 examples are drawn from the 10K pilot, so their images are already downloaded.
+
+| File | Examples | Q/A turns | Use |
+|---|---|---|---|
+| `data/pilot/stage1_pilot_10k.json` (from D1) | 10,000 | 10,000 | Check speed, memory and cost end to end before the full runs |
+| `data/pilot/stage2_pilot_10k.json` (from D1) | 10,000 | — | Same, for Stage 2 |
+| `data/pilot/stage1_overfit_100.json` | 100 | 100 | Overfit test for Stage 1 |
+| `data/pilot/stage2_overfit_100.json` | 100 | 240 | Overfit test for Stage 2 |
+
+**How to use the overfit test** (before any real run):
+1. Train on the 100 examples for a few hundred steps. The loss should fall close to 0. If it doesn't, check the loss masks, image-token positions and chat template.
+2. **Image check:** after it has memorized the examples, shuffle the images between examples. The loss should rise clearly. If it doesn't, the model isn't using the image.
+
 **D2 results (done 2026-11-24).** The full training data is in `gs://frozen-vlm-benchmark/raw/` (project `encouraging-art-515701-r8`, region `us-central1`). The zips are stored unextracted.
 
 | Bucket path | Size | Contents | Check |
