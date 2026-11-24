@@ -79,7 +79,7 @@ The pipeline runs in this order:
 
 **Stage 1, alignment (E1).** The encoder and the LLM are frozen. We train only the projector on LLaVA-Pretrain for one epoch, using one seed. All Stage 2 runs start from this checkpoint.
 
-**Stage 2, instruction tuning.** We train on LLaVA-Instruct-150K after removing POPE-overlapping images (see below). All conditions use the same data, the same number of steps and the same hyperparameters, with seeds {0, 1}:
+**Stage 2, instruction tuning.** We train on LLaVA-Instruct-150K, which we checked has no images in common with POPE (see below). All conditions use the same data, the same number of steps and the same hyperparameters, with seeds {0, 1}:
 
 | Run | Trained parameters | Seeds | Purpose |
 |---|---|---|---|
@@ -94,9 +94,9 @@ Seed variance covers Stage 2 only. Stage 1 is shared by all runs, and we state t
 
 ### Train/test overlap with POPE
 
-POPE uses 500 COCO **val2014** images. LLaVA-Instruct-150K uses COCO **train2017** images, and train2017 contains most of val2014, so overlap is likely. We handle it as follows:
+POPE uses 500 COCO **val2014** images. LLaVA-Instruct-150K uses COCO images distributed under their train2017 file names, and train2017 contains most of val2014, so overlap was possible. We checked as follows:
 
-- Before any Stage 2 run, we match COCO image IDs between the two sets. We **remove every Stage 2 conversation whose image appears in POPE**, and we report the number of images and conversations removed.
+- We matched COCO image IDs between the two sets (`scripts/check_pope_overlap.py`). **None of the 500 POPE images appear in LLaVA-Instruct-150K** (0 of 81,479 unique training images; 0 of 157,712 conversations), so no Stage 2 data needed to be removed. This is consistent with LLaVA-Instruct being built from COCO train2014 images, which never overlap with val2014. The script removes matching conversations automatically if the data changes.
 - LLaVA-Pretrain uses LAION/CC/SBU images rather than COCO. We run a perceptual-hash near-duplicate check against the 500 POPE images and report what it finds.
 - TextVQA (OpenImages) and ScienceQA images do not come from COCO. We cannot control what SigLIP 2 or Qwen2.5 saw during their own pretraining, and we state this as a limitation.
 
@@ -254,7 +254,7 @@ During the project we expect to use AI coding assistants for boilerplate code (d
 | Feedback | Change |
 |---|---|
 | TextVQA may be near floor; ScienceQA may mostly reflect format | Format-failure rates and accuracy on parseable answers for every model (§7). Near-floor results are stated as valid outcomes, and H1's ScienceQA claim must hold on parseable answers (§5). |
-| POPE (COCO val2014) overlaps with COCO training images | COCO image-ID matching; overlapping Stage 2 conversations removed before training and counts reported; pHash check for LLaVA-Pretrain (§6). |
+| POPE (COCO val2014) overlaps with COCO training images | COCO image-ID matching found 0 of 500 POPE images in LLaVA-Instruct-150K, so nothing was removed; pHash check for LLaVA-Pretrain still planned (§6). |
 | At least 2 seeds; bootstrap CIs; define "largest gain" | E2 and E3 with seeds {0, 1}; 95% paired-bootstrap CIs; gain, significant gain and largest gain defined before any run (§5, §7). |
 | Specify the blank-image test; use relative drops; compare with a text-only model tuned on the same data | Main test: mean-pixel gray image; secondary test: tokens removed; chance-normalized relative drop; new E0 text-only LoRA control (§6, §7). |
 | State the visual-token count | 729 tokens (27×27) → 169 (13×13) after 2×2 pooling; 81 and 729 variants bracket the main configuration (§6). |
