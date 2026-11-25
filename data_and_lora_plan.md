@@ -150,7 +150,7 @@ ds[0]  # {"pixel_values": [3,384,384], "input_ids": [L], "labels": [L]}
 ```
 
 - **Image tokens confirmed in the Qwen tokenizer:** `<|vision_start|>` = 151652, `<|image_pad|>` = 151655, `<|vision_end|>` = 151653. Each is a single token, so no new tokens are needed. The pad token is `<|endoftext|>` = 151643.
-- **Stand-in formatter:** `src/data/formatting_stub.py` has the same interface as Lakshya's `format_example` and follows the agreed format. The Dataset prints a warning while it is in use. **Swap:** pass `format_fn=format_example` once L3–L7 are done.
+- **Stand-in formatter:** `src/data/formatting_stub.py` has the same interface as Lakshya's `format_example` and follows the agreed format. The Dataset prints a warning while it is in use. **Swap:** see "Handoff: Lakshya → Divya" below.
 - **Bad images:**
   - Images listed in the D4 bad-image log are dropped up front.
   - If an image still fails at runtime, the Dataset warns and uses another random example.
@@ -169,6 +169,66 @@ ds[0]  # {"pixel_values": [3,384,384], "input_ids": [L], "labels": [L]}
 - A bad-image entry drops exactly 1 example.
 - A wrong `image_dir` raises a clear error.
 - The sequences are well below the 2048 maximum. Stage 1 is mostly image tokens.
+
+**D7 results (done 2026-11-24).** The code is in `src/data/loader.py`. This is the handoff function for training and eval:
+
+```python
+from src.data.loader import get_dataloader
+dl = get_dataloader(stage=2, split="pilot",      # "overfit" (100) | "pilot" (10K) | "full"
+                    subset_size=None, text_only=False,
+                    batch_size=8, seed=0, num_workers=4,
+                    data_root="data", format_fn=None)   # None = stub until Lakshya's is ready
+batch = next(iter(dl))
+# pixel_values [B,3,384,384] | input_ids, attention_mask, labels [B,L]
+```
+
+- **Collator:**
+  - Pads on the right: `input_ids` with 151643, `labels` with -100, `attention_mask` with 0.
+  - Rounds the length up to a multiple of 8, which suits the GPU.
+  - Stacks the images.
+  - Truncates to 2048 as a safety net. This never cuts image tokens, because they come first.
+- **Reproducible:** the same `seed` gives the same batch order and the same `subset_size` sample.
+- **Paths for `split="full"`:** the JSONs are read from `raw/...` and the images from `images/pretrain` and `images/coco/train2017`. That's where the training job must extract `images.zip` and `train2017.zip` under `data_root`.
+- **Eval note:** batched generation needs **left** padding. The eval pipeline should pad on its own rather than reuse this collator.
+- **Tests:** `python tests/test_loader.py`. All checks pass on both overfit sets:
+
+| | Stage 1 | Stage 2 |
+|---|---|---|
+| Batch shapes (B = 8) | `input_ids` [8, 224], `pixel_values` [8, 3, 384, 384] | `input_ids` [8, 784], `pixel_values` [8, 3, 384, 384] |
+| 100 examples, 2 workers, laptop | 3.0 s | 2.4 s |
+
+  Also checked: padding is never trained on, image tokens are never trained on, there are exactly 169 image tokens per example, `text_only` batches have no images, `subset_size` works, and truncation from 3000 to 2048 tokens works.
+- **Possible later speed-up:** Stage 2 lengths vary (279–781 in one batch), so much of each batch is padding. Grouping examples of similar length into batches would cut wasted GPU time. Try this only if the pilot shows Stage 2 is slow.
+
+**D8 results (done 2026-11-24).** Run with `python scripts/sanity_check.py`. It writes `data/processed/sanity/report.json` and a visual check page, `data/processed/sanity/samples.html`.
+
+**Counts:**
+
+| Split | Stage | Examples | Unique images | Q/A turns | Avg answer length |
+|---|---|---|---|---|---|
+| overfit | 1 | 100 | 100 | 100 | 9.7 words |
+| overfit | 2 | 100 | 100 | 240 | 64.8 words |
+| pilot | 1 | 10,000 | 10,000 | 10,000 | 9.8 words |
+| pilot | 2 | 10,000 | 9,627 | 23,035 | 66.7 words |
+| full | 1 | 558,128 | 558,128 | 558,128 | 9.8 words |
+| full | 2 | 157,712 | 81,479 | 361,411 | 66.8 words |
+
+The pilot and overfit sets match the full data on answer length and turns per example (about 2.3 Q/A turns per Stage 2 example), so they're representative.
+
+**Visual check:**
+- 20 random pilot examples (10 per stage) are rendered with the image, the decoded model input and the trained text.
+- **All 20 were checked by eye, and every image matches its text**, so images and text are correctly paired. Examples include a tartan key charm, a chess player, a rider in snowy mountains and a clock tower.
+
+**Loader speed** (pilot, batch size 16, 4 workers, 100 batches, laptop CPU):
+
+| | Seconds per batch | Examples per second |
+|---|---|---|
+| Stage 1 | 0.020 | ~800 |
+| Stage 2 | 0.028 | ~580 |
+
+This is far more than one A100 is likely to process per second for this model, so data loading shouldn't slow training. Confirm this against the actual GPU step time in the pilot run.
+
+**macOS note:** with `num_workers > 0`, code that builds a loader must sit under `if __name__ == "__main__":`. Otherwise the worker processes hang on start-up. Linux (Vertex) is not affected.
 
 **D2 results (done 2026-11-24).** The full training data is in `gs://frozen-vlm-benchmark/raw/` (project `encouraging-art-515701-r8`, region `us-central1`). The zips are stored unextracted.
 
@@ -210,6 +270,39 @@ How it was done (to repeat later, e.g. for eval data):
 | 5 | **Together:** connect the tracks, load the 10K pilot end to end, and hand `get_dataloader` to Ritwik and Vinod | |
 
 **Final check (both):** one batch from the pilot loader, decoded back to text, shows the right image-token count, correct masks and the matching image.
+
+#### Handoff: Lakshya → Divya (when `format_example` is ready)
+
+Divya's track (D1–D8) is finished and runs on a temporary stand-in formatter, `src/data/formatting_stub.py`. **When L3–L8 are done, Lakshya hands `format_example` to Divya**, who swaps it in and re-runs the checks.
+
+**Lakshya: what to hand over**
+1. Put the function in `src/data/formatting.py` with the same interface as the stub:
+   ```python
+   format_example(conversation, stage, text_only=False, inference=False)
+       -> {"input_ids": [int, ...], "labels": [int, ...]}
+   ```
+   - `conversation` is the LLaVA list `[{"from": "human"|"gpt", "value": "..."}, ...]`.
+   - The `<image>` placeholder becomes `<|vision_start|>` + 169 × `<|image_pad|>` + `<|vision_end|>`. Use ID 151655 for `<|image_pad|>`.
+   - Labels are `-100` everywhere except assistant replies (including their `<|im_end|>`).
+   - Sequences are truncated to 2048 tokens without cutting the image tokens.
+   - `text_only=True` gives no image tokens. `inference=True` gives no answer, and the prompt ends at `<|im_start|>assistant\n`.
+2. Push it on a branch and tell Divya.
+
+**Divya: swap it in and re-check**
+1. Make the real function the default. In `src/data/dataset.py`, replace the stub import in `VLMDataset.__init__`:
+   ```python
+   from src.data.formatting import format_example as format_fn
+   ```
+   Also update `scripts/sanity_check.py` to import `get_tokenizer` from the real module, if Lakshya provides one.
+2. Re-run both checks; **both must still pass**:
+   ```bash
+   python tests/test_loader.py        # expect: ALL CHECKS PASSED
+   python scripts/sanity_check.py     # then open data/processed/sanity/samples.html
+   ```
+   - `test_loader.py` checks: 169 image tokens per example, image tokens and padding never trained on, correct batch shapes, `text_only` works, and the seed gives the same order.
+   - On `samples.html`: the decoded input should follow the agreed format, and the green trained text should be **only** the assistant's answers.
+3. Compare with the stub's numbers (D6 and D7 results above). Sequence lengths and the share of trained tokens should be close: about 6% for Stage 1 and 44% for Stage 2. A large change means a difference in masking or the template, so look into it before training.
+4. Once both pass, delete `src/data/formatting_stub.py` and hand `get_dataloader` to Ritwik and Vinod.
 
 #### Image-token format (our decision)
 
