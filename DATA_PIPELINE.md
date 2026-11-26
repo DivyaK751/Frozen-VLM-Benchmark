@@ -116,7 +116,7 @@ The full data is in `gs://frozen-vlm-benchmark/raw/`, stored as zips (about 47 G
 
 - **Copy the zips to the job's local disk and extract them there.** Reading single files from the bucket is far too slow.
 - Image paths in the JSONs are relative, for example `00217/002170933.jpg` or `000000369358.jpg`. After extraction, check that `images/pretrain/00217/002170933.jpg` exists. If the zip added an extra top-level folder, move the files up one level.
-- Before training, run `scripts/check_images.py --zip ... --out data/processed/bad_images.json` once. The loader reads that file automatically and skips the images listed in it. If an image still fails at runtime, the loader warns and swaps in another example instead of crashing.
+- **Bad images:** the full zips have already been scanned, and **none are bad**. Copy `gs://frozen-vlm-benchmark/processed/image_checks/bad_images.json` to `data/processed/bad_images.json`, which the loader reads automatically (it skips any listed image). If an image still fails at runtime, the loader warns and swaps in another example instead of crashing.
 - Use 4–8 data-loading workers. Loading takes about 3–5 ms per example on a laptop CPU, so it won't hold the GPU back.
 
 ## 6. Notes for the eval pipeline
@@ -127,7 +127,7 @@ The full data is in `gs://frozen-vlm-benchmark/raw/`, stored as zips (about 47 G
 - **System prompt:** we use Qwen2.5's default system prompt, the same one Qwen's chat template and lmms-eval insert when no system message is given. Keep it unchanged so eval matches training.
 - **Image preprocessing:** use `load_image` and `preprocess` from [src/data/images.py](src/data/images.py), so eval images get the same resize (stretched to 384×384), RGB conversion and normalization.
 - **Blank-image test:** `blank_image()` in the same file returns a gray image that normalizes to about 0.
-- **POPE contamination:** LLaVA-Instruct (COCO train2014) shares **no images** with POPE (COCO val2014), so no filtering was needed. The report is in `data/processed/pope_overlap.json`.
+- **POPE contamination: none.** LLaVA-Instruct (COCO train2014) shares **no image IDs** with POPE (COCO val2014); the report is in `data/processed/pope_overlap.json`. A perceptual-hash check of all 558K Pretrain and 118K COCO images found **no near-duplicates** of POPE images either. All 207 close candidates were checked by eye; see `data/processed/pope_near_dups/` and the D3 notes in [data_and_lora_plan.md](data_and_lora_plan.md).
 
 ## 7. Checks you can run
 
@@ -142,8 +142,11 @@ The full data is in `gs://frozen-vlm-benchmark/raw/`, stored as zips (about 47 G
 
 ## 8. Still open
 
-- **Near-duplicate check:** a perceptual-hash comparison between POPE and the LLaVA-Pretrain images (LAION/CC/SBU). It needs all 558K images, so it has to run as a cloud job.
-- **Bad-image scan:** run `scripts/check_images.py` on the full `images.zip` and `train2017.zip` in the cloud. So far it has only been run on the pilot, which had 0 bad images.
+Nothing on the data side. The two former items were done on 2026-11-26:
+- **Bad-image scan:** 0 bad images across all 676,415 training images.
+- **POPE near-duplicate check:** 0 near-duplicates.
+
+The cloud job is `scripts/cloud/launch_image_checks.sh`.
 
 ## 9. File map
 
@@ -157,6 +160,8 @@ The full data is in `gs://frozen-vlm-benchmark/raw/`, stored as zips (about 47 G
 | [scripts/download_pilot.py](scripts/download_pilot.py) | Downloads the 10K pilot per stage |
 | [scripts/make_subsets.py](scripts/make_subsets.py) | Builds the 100-example overfit sets |
 | [scripts/check_images.py](scripts/check_images.py) | Scans a folder or zip for unreadable images |
-| [scripts/check_pope_overlap.py](scripts/check_pope_overlap.py) | POPE / training-data overlap report |
+| [scripts/check_pope_overlap.py](scripts/check_pope_overlap.py) | POPE / training-data overlap report (exact COCO IDs) |
+| [scripts/check_pope_near_dups.py](scripts/check_pope_near_dups.py), [scripts/review_pope_near_dups.py](scripts/review_pope_near_dups.py) | POPE near-duplicate check (pHash) and its by-eye review page |
+| [scripts/cloud/](scripts/cloud/) | Cloud job that runs the bad-image scan and the near-duplicate check on the full zips |
 | [scripts/sanity_check.py](scripts/sanity_check.py), [scripts/check_formatting.py](scripts/check_formatting.py) | Human-readable checks |
 | [tests/](tests/) | `test_loader.py`, `test_formatting.py` |
