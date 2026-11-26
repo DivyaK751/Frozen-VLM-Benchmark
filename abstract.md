@@ -42,7 +42,7 @@ Hallucination makes VLMs unsafe for uses such as describing scenes for visually 
 - **LLaVA** (Liu et al., 2023) introduced visual instruction tuning with 7–13B LLMs. We study the same recipe at 0.5B.
 - **LLaVA-1.5** (Liu et al., 2024) added an MLP projector, full LLM fine-tuning and academic-task data with short-answer format prompts. We compare projector-only training with LoRA on a small budget, without the academic-task mix.
 - **TinyLLaVA** (Zhou et al., 2024) surveys small LLM/encoder pairs. We instead run one controlled ablation with multiple seeds, plus hallucination and grounding analysis.
-- **SmolVLM** (Marafioti et al., 2025) pairs a SigLIP So400m encoder with visual-token compression for small models. We adopt this encoder with 2×2 pooling and test what the connector and LoRA each contribute.
+- **SmolVLM** (Marafioti et al., 2025) pairs a SigLIP So400m encoder with visual-token compression for small models. We adopt this encoder with average pooling of its patch tokens and test what the connector and LoRA each contribute.
 - **POPE** (Li et al., 2023) measures object hallucination. We use it and break down failures by split and object type.
 
 ## 5. Research question and hypotheses
@@ -69,11 +69,11 @@ The pipeline runs in this order:
 
 1. The input image is resized to 384 px.
 2. The frozen SigLIP 2 So400m encoder (patch size 14) turns it into **729 patch tokens** (a 27×27 grid).
-3. 2×2 average pooling with stride 2 reduces this to a **13×13 grid, or 169 visual tokens**. The last row and column of the odd-sized grid are dropped.
+3. Adaptive average pooling to 13×13 reduces this to **169 visual tokens**. Because 27 is odd, plain 2×2 pooling would drop the last row and column (53 of the 729 patches, a strip along the right and bottom edges). Adaptive pooling instead averages overlapping 3×3 windows with stride 2 that cover the whole grid, so every patch contributes.
 4. A 2-layer MLP projector with GELU maps the features from 1152 to 896 dimensions. This projector is the trained part.
 5. Qwen2.5-0.5B-Instruct reads the 169 visual tokens, then the text prompt, and generates the answer.
 
-**Visual-token configurations.** The main configuration uses **169 tokens**. The stretch variants bracket it: **81 tokens** (9×9, from 3×3 pooling) is more compressed, and **729 tokens** (no pooling) is the full encoder output.
+**Visual-token configurations.** The main configuration uses **169 tokens** (729 before pooling). The stretch variants bracket it: **81 tokens** (9×9, from 3×3 pooling with stride 3) is more compressed, and **729 tokens** (no pooling) is the full encoder output. All three use every patch, so they differ only in how strongly the image is compressed.
 
 ### Training
 
@@ -204,7 +204,7 @@ All training and evaluation run on Google Cloud Vertex AI custom training, paid 
 **Workstream leads:**
 
 - **Ritwik Sharan – training pipeline:** data download and preprocessing, POPE-overlap filtering, chat formatting, Stage 1/2 training loop, E0 text-only run, Vertex jobs and checkpointing.
-- **Divyasri Kadekar – connector:** So400m encoder setup, 2×2 pooling (169 tokens), MLP projector, E1 alignment, and E2 projector-only runs (both seeds).
+- **Divyasri Kadekar – connector:** So400m encoder setup, 13×13 adaptive pooling (169 tokens), MLP projector, E1 alignment, and E2 projector-only runs (both seeds).
 - **Vinod Walia – LoRA:** LoRA configuration on Qwen (rank and target layers), E3 projector + LoRA runs (both seeds), LoRA-rank ablation, and training-curve comparison of E2 vs. E3.
 - **Lakshya Khandelwal – evaluation:** ScienceQA, TextVQA and POPE with lmms-eval; format-failure parsing; text-only and blank-image baselines; bootstrap CIs; POPE hallucination breakdown; results tables.
 
@@ -254,9 +254,9 @@ During the project we expect to use AI coding assistants for boilerplate code (d
 | Feedback | Change |
 |---|---|
 | TextVQA may be near floor; ScienceQA may mostly reflect format | Format-failure rates and accuracy on parseable answers for every model (§7). Near-floor results are stated as valid outcomes, and H1's ScienceQA claim must hold on parseable answers (§5). |
-| POPE (COCO val2014) overlaps with COCO training images | COCO image-ID matching found 0 of 500 POPE images in LLaVA-Instruct-150K, so nothing was removed; pHash check for LLaVA-Pretrain still planned (§6). |
+| POPE (COCO val2014) overlaps with COCO training images | COCO image-ID matching found 0 of 500 POPE images in LLaVA-Instruct-150K, so nothing was removed. A pHash check of all 558K LLaVA-Pretrain and 118K COCO training images found no near-duplicates of POPE images (§6). |
 | At least 2 seeds; bootstrap CIs; define "largest gain" | E2 and E3 with seeds {0, 1}; 95% paired-bootstrap CIs; gain, significant gain and largest gain defined before any run (§5, §7). |
 | Specify the blank-image test; use relative drops; compare with a text-only model tuned on the same data | Main test: mean-pixel gray image; secondary test: tokens removed; chance-normalized relative drop; new E0 text-only LoRA control (§6, §7). |
-| State the visual-token count | 729 tokens (27×27) → 169 (13×13) after 2×2 pooling; 81 and 729 variants bracket the main configuration (§6). |
+| State the visual-token count | 729 tokens (27×27) before pooling → 169 (13×13) after adaptive average pooling, which uses every patch; the 81 (9×9) and 729 (no pooling) variants bracket the main configuration (§6). |
 | Add one ablation of our own | LoRA rank 4 / 16 / 64, compared with the E3 seed spread (§6, §8). |
 | References list and AI-use disclosure | Added (§11, §12). |

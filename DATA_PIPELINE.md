@@ -46,7 +46,7 @@ Each example looks like this, with one image per example in the first user turn:
 The text contains **169 placeholder tokens** (`<|image_pad|>`, ID `151655`) for each image. Your forward pass should:
 
 1. Run SigLIP on `pixel_values` to get a 27×27 grid of patch features.
-2. Apply 2×2 average pooling with stride 2 to get 13×13 = **169** features, then run the projector into Qwen's hidden size.
+2. Pool to 13×13 = **169** features with `pool_patches` from [src/model/pooling.py](src/model/pooling.py) (adaptive average pooling, which uses every patch), then run the projector into Qwen's hidden size.
 3. Embed `input_ids` as usual, then **overwrite the embeddings at positions where `input_ids == IMAGE_PAD_ID`** with the 169 projector outputs, in order.
 
 ```python
@@ -135,6 +135,7 @@ The full data is in `gs://frozen-vlm-benchmark/raw/`, stored as zips (about 47 G
 |---|---|
 | `python tests/test_loader.py` | Batch shapes, 169 image tokens per example, padding and image tokens never trained on, `text_only`, seeding, truncation |
 | `python tests/test_formatting.py` | Output matches Qwen's own `apply_chat_template` token for token on all 20,000 pilot examples |
+| `python tests/test_pooling.py` | 27×27 → 169 tokens, all 729 patches used (plain 2×2 pooling would use 676), row-major order, 81- and 729-token variants |
 | `python scripts/sanity_check.py` | Counts, loader speed, and `data/processed/sanity/samples.html`, which shows each image next to its decoded text and the trained span. All 20 samples were checked by hand: every image matches its text. |
 | `python scripts/check_formatting.py` | Writes decoded examples, with trained tokens in `[[ ]]`, to a text file you can read |
 
@@ -153,6 +154,7 @@ The cloud job is `scripts/cloud/launch_image_checks.sh`.
 | File | What it does |
 |---|---|
 | [src/config.py](src/config.py) | Shared constants: token IDs, image-token count, prompts, max length |
+| [src/model/pooling.py](src/model/pooling.py) | `pool_patches`: SigLIP's 27×27 patch features → 13×13 = 169 visual tokens (adaptive average pooling, every patch used) |
 | [src/data/formatting.py](src/data/formatting.py) | `format_example`: LLaVA conversation → Qwen tokens + labels (training, `text_only`, `inference`) |
 | [src/data/images.py](src/data/images.py) | `load_image`, `preprocess` (SigLIP processor), `blank_image` |
 | [src/data/dataset.py](src/data/dataset.py) | `VLMDataset`: one example → `pixel_values`, `input_ids`, `labels`; skips bad images |
@@ -164,4 +166,4 @@ The cloud job is `scripts/cloud/launch_image_checks.sh`.
 | [scripts/check_pope_near_dups.py](scripts/check_pope_near_dups.py), [scripts/review_pope_near_dups.py](scripts/review_pope_near_dups.py) | POPE near-duplicate check (pHash) and its by-eye review page |
 | [scripts/cloud/](scripts/cloud/) | Cloud job that runs the bad-image scan and the near-duplicate check on the full zips |
 | [scripts/sanity_check.py](scripts/sanity_check.py), [scripts/check_formatting.py](scripts/check_formatting.py) | Human-readable checks |
-| [tests/](tests/) | `test_loader.py`, `test_formatting.py` |
+| [tests/](tests/) | `test_loader.py`, `test_formatting.py`, `test_pooling.py` |

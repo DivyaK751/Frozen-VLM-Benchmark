@@ -386,7 +386,7 @@ We set this format. Ritwik and Vinod build their code against it.
 
 - **Image tokens:** `<|vision_start|>` + 169 × `<|image_pad|>` + `<|vision_end|>`. These reuse tokens already in the Qwen2.5 tokenizer, so no new tokens are added and the embeddings don't need resizing.
 - **Token IDs** (confirmed in L1, stored in `src/config.py`): `vision_start = 151652`, `image_pad = 151655`, `vision_end = 151653`
-- **Tokens per image: 169.** SigLIP gives a 27×27 grid; 2×2 average pooling with stride 2 gives 13×13 = 169 (abstract.md §6). This is the single constant `NUM_IMAGE_TOKENS` in `config.py`, so changing it later is a one-line edit.
+- **Tokens per image: 169.** SigLIP gives a 27×27 grid; adaptive average pooling to 13×13 gives 169 (abstract.md §6). We changed this from 2×2 pooling with stride 2, which drops the last row and column of patches because 27 is odd. For 27 → 13, adaptive pooling is exactly 3×3 pooling with stride 2, so all 729 patches contribute. The code is `pool_patches` in `src/model/pooling.py`, and `POOLED_GRID` in `config.py` sets the grid. `NUM_IMAGE_TOKENS = POOLED_GRID ** 2`, so changing the token count later is a one-line edit.
 - **Position:** the image comes at the start of the first user turn, before the question:
   ```
   <|im_start|>system\n{Qwen default system prompt}<|im_end|>
@@ -415,7 +415,7 @@ We set this format. Ritwik and Vinod build their code against it.
    - Target all 7 linear layers in each block: `q, k, v, o` (attention) and `gate, up, down` (MLP).
    - That gives about 8.8M trainable parameters, compared with about 1.8M for the projector.
 2. **Combine LoRA with the projector.**
-   - To test without waiting for the projector team, build a small stand-in model from the abstract.md §6 spec: frozen SigLIP → 2×2 pooling → 2-layer MLP (1152 → 896, GELU, randomly initialized) → Qwen, using the image-token replacement described in the format section.
+   - To test without waiting for the projector team, build a small stand-in model from the abstract.md §6 spec: frozen SigLIP → `pool_patches` (13×13) → 2-layer MLP (1152 → 896, GELU, randomly initialized) → Qwen, using the image-token replacement described in the format section.
    - For the real E3 runs, swap the stand-in projector for the Stage 1 projector checkpoint. The shapes are the same, so nothing else changes.
    - Trainable parameters are the projector plus LoRA. SigLIP and the base Qwen weights stay frozen.
    - Print the trainable parameter count to confirm this.

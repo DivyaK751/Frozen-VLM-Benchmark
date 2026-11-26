@@ -8,7 +8,10 @@ LLM_NAME = "Qwen/Qwen2.5-0.5B-Instruct"
 # Image tokens: <|vision_start|> + NUM_IMAGE_TOKENS x <|image_pad|> + <|vision_end|>.
 # All three already exist in the Qwen2.5 tokenizer as single tokens (checked in L1),
 # so no tokens are added and the embeddings are not resized.
-NUM_IMAGE_TOKENS = 169          # 27x27 SigLIP grid -> 2x2 avg pool -> 13x13
+ENCODER_GRID = 27               # SigLIP 2 So400m, patch 14 at 384 px: 27x27 = 729 patch tokens
+POOLED_GRID = 13                # adaptive average pooling 27x27 -> 13x13; every patch is used
+                                # (variants: 9 -> 81 tokens, 27 -> 729 tokens = no pooling)
+NUM_IMAGE_TOKENS = POOLED_GRID ** 2   # 169
 VISION_START_TOKEN = "<|vision_start|>"
 IMAGE_PAD_TOKEN = "<|image_pad|>"
 VISION_END_TOKEN = "<|vision_end|>"
