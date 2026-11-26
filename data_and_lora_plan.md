@@ -259,6 +259,45 @@ How it was done (to repeat later, e.g. for eval data):
 | L7 | **Text-only variant (E0)**: `text_only=True` drops the image tokens and keeps everything else the same | 8 | No image tokens appear in text-only output | 0.5–1 h |
 | L8 | **Text sanity checks**: decode 10 random examples per stage with their masks and read them | 9 | Short notes added to this file | 1 h |
 
+**L1–L8 results (done 2026-11-25).** The code is in `src/config.py` and `src/data/formatting.py`. Check it with `python tests/test_formatting.py` and `python scripts/check_formatting.py`.
+
+```python
+from src.data.formatting import format_example, get_tokenizer
+format_example(conversation, stage, text_only=False, inference=False)  # -> {"input_ids", "labels"}
+```
+
+- **L1/L2:** the token IDs are filled in under [Image-token format](#image-token-format-our-decision). `src/config.py` holds `NUM_IMAGE_TOKENS`, the token IDs, `PAD_TOKEN_ID`, `SYSTEM_PROMPT`, `STAGE1_PROMPT`, `MAX_LEN` and `IGNORE_INDEX`. `loader.py` now imports its constants from `config.py`.
+- **Decisions:**
+  - **System prompt:** Qwen2.5's default, "You are Qwen, created by Alibaba Cloud. You are a helpful assistant." This is what Qwen's chat template (and so lmms-eval) inserts when no system message is given, so training and eval match. The stub used "You are a helpful assistant."
+  - **Stage 1 prompt:** LLaVA-Pretrain's varied caption requests are all replaced by the fixed `STAGE1_PROMPT = "Describe the image."`, as step 3 specifies.
+  - **Labels:** each assistant reply plus its `<|im_end|>` is trained on, so the model learns to stop. The `<|im_start|>assistant\n` header and the `\n` after `<|im_end|>` are not.
+  - **Strict input:** `format_example` raises `ValueError` if turns don't alternate human/gpt, if `<image>` appears outside the first user turn, or if the image-token count is wrong. All 715,840 examples in the full data pass these checks: every example has exactly one `<image>`, in the first human turn.
+  - **`inference=True`:** drops the final answer, ends with `<|im_start|>assistant\n`, and sets every label to -100. An over-long inference prompt is not truncated, since cutting would remove the generation prompt; a warning is logged instead.
+- **Tests (`tests/test_formatting.py`), all 20,000 pilot examples:**
+  - The output matches Qwen's own `apply_chat_template` token for token, in normal, `text_only` and `inference` modes.
+  - There are exactly 169 contiguous `<|image_pad|>` tokens between `<|vision_start|>` and `<|vision_end|>`, at the start of the first user turn.
+  - The trained tokens decode to exactly the concatenated assistant answers, each followed by `<|im_end|>`.
+  - `text_only` is the same sequence minus 172 tokens (start, 169 pads, end, `\n`), with identical trained tokens.
+  - A 5,000-word answer is truncated to 2048 tokens with the image block intact. Malformed conversations are rejected.
+- **End to end:** `tests/test_loader.py` checks pass with `format_fn=format_example` on both overfit sets. The trained share is 5.8% for Stage 1 and 43.3% for Stage 2, close to the stub's 6% and 44%.
+
+**L6: truncation on the full data** (`data/processed/formatting/report.json`):
+
+| | Examples | Length min / median / p99 / max | Over 2048 (truncated) |
+|---|---|---|---|
+| Stage 1 (558K) | 558,128 | 209 / 218 / 234 / 268 | **0 (0%)** |
+| Stage 2 (Instruct-150K) | 157,712 | 213 / 363 / 809 / 1,124 | **0 (0%)** |
+
+No example is truncated at `MAX_LEN = 2048`. The longest is 1,124 tokens, so even the 729-token variant (+560 tokens) stays under the limit.
+
+**L8: decoded samples** (`data/processed/formatting/decoded_samples.txt`, 10 per stage, seed 0, trained tokens shown in `[[ ]]`):
+- All 20 were read in full, and no problems were found. Every one follows the agreed layout: system prompt, then the image block at the start of the first user turn, then the question.
+- In Stage 1, the original request is replaced by "Describe the image." and only the caption plus `<|im_end|>` is trained.
+- In Stage 2, multi-turn conversations (two 5-turn examples, about a kite and a wartime train) train on every assistant reply and on nothing else: user turns, headers and the image are all masked.
+- `<image>` is removed cleanly whether it came before or after the question, leaving no stray newline.
+- Paragraph breaks (`\n\n`) and double spaces inside answers are kept exactly as they are.
+- Nothing is truncated (the longest sample is 613 tokens), and each image appears only once, in the first user turn.
+
 #### Schedule
 
 | Day | Divya | Lakshya |
@@ -309,7 +348,7 @@ Divya's track (D1–D8) is finished and runs on a temporary stand-in formatter, 
 We set this format. Ritwik and Vinod build their code against it.
 
 - **Image tokens:** `<|vision_start|>` + 169 × `<|image_pad|>` + `<|vision_end|>`. These reuse tokens already in the Qwen2.5 tokenizer, so no new tokens are added and the embeddings don't need resizing.
-- **Token IDs:** *fill in after L1*: `vision_start = ___`, `image_pad = ___`, `vision_end = ___`
+- **Token IDs** (confirmed in L1, stored in `src/config.py`): `vision_start = 151652`, `image_pad = 151655`, `vision_end = 151653`
 - **Tokens per image: 169.** SigLIP gives a 27×27 grid; 2×2 average pooling with stride 2 gives 13×13 = 169 (abstract.md §6). This is the single constant `NUM_IMAGE_TOKENS` in `config.py`, so changing it later is a one-line edit.
 - **Position:** the image comes at the start of the first user turn, before the question:
   ```
