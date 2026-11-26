@@ -106,7 +106,16 @@ format_example(conversation, stage, text_only=False) -> {"input_ids": [...], "la
 
 - **No filtering is needed.** Use the original `llava_instruct_150k.json` and the pilot as they are. LLaVA-Instruct is built from COCO train2014, and POPE uses val2014; the two never share images.
 - Checks run: COCO IDs parse as plain integers on both sides, both fall in COCO's ID range, and a known POPE ID (310196) is found.
-- **Still open:** the near-duplicate (perceptual-hash) check between POPE and the LLaVA-Pretrain images (LAION/CC/SBU). It needs all 558K images, so run it as a cloud job later.
+- **Near-duplicate check (done 2026-11-26): no POPE image appears in the training data.** The exact-ID check can't catch the same photo stored under a different name, for example a COCO photo scraped into LAION/CC/SBU. This check compares a 64-bit perceptual hash (pHash) of each of POPE's 500 images with every training image. It ran on the cloud job described under D4 below. Code: `scripts/check_pope_near_dups.py` (hashing), then `scripts/review_pope_near_dups.py` (keeps only images the training JSONs use and renders the pairs). Report: `data/processed/pope_near_dups/` (`report.json`; `review/index.html` holds the 207 pictures).
+  - **Calibration.** Altered copies of 20 POPE images (resized to 60%, JPEG quality 30, 3% crop, grayscale) were all caught: 15 at 0 bits and the crops at 2–8 bits. Unrelated photos start matching at about 8 bits, so every pair within 10 bits was reported and judged by eye.
+
+  | Training images | Hashed | Pairs within 10 bits | Using an image that training uses | Real duplicates (by eye) |
+  |---|---|---|---|---|
+  | LLaVA-Pretrain `images.zip` | 558,128 | 190 (1 at 4 bits, 4 at 6, 18 at 8, 167 at 10) | 190 | **0** |
+  | COCO `train2017.zip` | 118,287 | 447 | 17 (all at 10 bits) | **0** |
+
+  - **All 207 candidates were checked by eye.** Every one is a different photo. Most are product shots on white backgrounds, which hash like low-texture photos such as POPE's woman in front of a plain wall.
+  - **The other 430 COCO pairs are not leakage.** `train2017.zip` also holds most of COCO val2014, which is POPE's source, so 426 POPE images match their own file exactly (same COCO ID, 0 bits). LLaVA-Instruct never uses those files, as the ID check above already showed, and the remaining 4 are also unused.
 
 **D4 results (done 2026-11-24).** The code is in `src/data/images.py`:
 
@@ -123,7 +132,21 @@ format_example(conversation, stage, text_only=False) -> {"input_ids": [...], "la
 - **SigLIP processor settings:** bilinear resize, rescale 1/255, mean and std 0.5. `do_convert_rgb` is unset, which is why `load_image` converts to RGB itself.
 - **Pilot check:** all 19,627 images load, with 0 bad. The originals were 19,551 RGB and 76 grayscale, and all 76 grayscale images convert correctly.
 - **Speed:** 3.1 ms per image on a laptop. That's about 30 CPU-minutes per Stage 1 epoch, so it won't slow the GPU down with 4–8 data-loading workers.
-- **Bad-image log:** `scripts/check_images.py` scans a folder or a zip directly, without extracting, and writes the bad files and their errors to JSON. Tested on a zip with a truncated JPEG and a non-image file: both were caught. **To do:** run it on the full `images.zip` and `train2017.zip` in the cloud before training, and have the D6 Dataset skip the files it lists.
+- **Bad-image log:** `scripts/check_images.py` scans a folder or a zip directly, without extracting, and writes the bad files and their errors to JSON. Tested on a zip with a truncated JPEG and a non-image file: both were caught.
+- **Full-data scan (done 2026-11-26): 0 bad images.**
+
+  | Zip | Images | Bad | Grayscale (converted to RGB on load) |
+  |---|---|---|---|
+  | `images.zip` (Pretrain) | 558,128 | 0 | 3,495 |
+  | `train2017.zip` (COCO) | 118,287 | 0 | 227 |
+
+  The result is in `gs://frozen-vlm-benchmark/processed/image_checks/bad_images.json` and is fetched to `data/processed/bad_images.json`, the path the loader reads by default. Training jobs don't need to scan again; fetch the file instead.
+- **How the cloud job runs** (`scripts/cloud/launch_image_checks.sh`, with `launch`, `status`, `fetch` and `teardown`):
+  - It uses one `e2-standard-16` VM with a 400 GB disk and **no public IP and no internet**.
+  - Code, Python wheels and POPE are uploaded to `gs://frozen-vlm-benchmark/jobs/image_checks/`. The VM reads them and the zips through Private Google Access, which is now enabled on the `default` subnet in `us-central1`. This avoids D2's Cloud NAT and IAP setup.
+  - `scripts/cloud/image_checks_job.sh` is the VM's startup script. It runs the bad-image scan and the pHash check straight from the zips, uploads results plus a `DONE` or `FAILED` marker, and powers the VM off.
+  - **Runtime:** 2.5 min to copy the 47 GB, 1.5 min for the scan and 3.5 min for hashing, so about 10 min in total, for well under $1. The VM was deleted afterwards.
+  - The same pattern (wheels in the bucket, Private Google Access, a startup script) works for any future CPU job.
 
 **D5 results (done 2026-11-24).** Run with `python scripts/make_subsets.py` (seed 0). The 100 examples are drawn from the 10K pilot, so their images are already downloaded.
 
