@@ -78,7 +78,7 @@ def get_dataloader(stage, split="pilot", subset_size=None, text_only=False, batc
     split        "overfit" (100), "pilot" (10K) or "full"
     subset_size  optionally keep only the first N examples (fixed by `seed`)
     text_only    no images (E0 and the no-image test)
-    format_fn    Lakshya's format_example; None = temporary stub
+    format_fn    formatter; None = src.data.formatting.format_example
     """
     json_rel, img_rel = SPLITS[split][stage]
     root = Path(data_root)

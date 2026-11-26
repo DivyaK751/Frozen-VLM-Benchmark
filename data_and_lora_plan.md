@@ -143,14 +143,14 @@ format_example(conversation, stage, text_only=False) -> {"input_ids": [...], "la
 ```python
 from src.data.dataset import VLMDataset, load_bad_images
 ds = VLMDataset("data/pilot/stage2_overfit_100.json", "data/pilot/images/stage2", stage=2,
-                format_fn=None,          # None = temporary stub; later Lakshya's format_example
+                format_fn=None,          # None = Lakshya's format_example (src/data/formatting.py)
                 text_only=False,         # True for E0 / no-image test (no pixel_values)
                 bad_images=load_bad_images("data/processed/bad_images.json"))
 ds[0]  # {"pixel_values": [3,384,384], "input_ids": [L], "labels": [L]}
 ```
 
 - **Image tokens confirmed in the Qwen tokenizer:** `<|vision_start|>` = 151652, `<|image_pad|>` = 151655, `<|vision_end|>` = 151653. Each is a single token, so no new tokens are needed. The pad token is `<|endoftext|>` = 151643.
-- **Stand-in formatter:** `src/data/formatting_stub.py` has the same interface as Lakshya's `format_example` and follows the agreed format. The Dataset prints a warning while it is in use. **Swap:** see "Handoff: Lakshya → Divya" below.
+- **Formatter:** built and tested first against a stand-in, `src/data/formatting_stub.py`. It was replaced by Lakshya's `format_example` on 2026-11-25 and deleted (see "Handoff: Lakshya → Divya" below).
 - **Bad images:**
   - Images listed in the D4 bad-image log are dropped up front.
   - If an image still fails at runtime, the Dataset warns and uses another random example.
@@ -177,7 +177,7 @@ from src.data.loader import get_dataloader
 dl = get_dataloader(stage=2, split="pilot",      # "overfit" (100) | "pilot" (10K) | "full"
                     subset_size=None, text_only=False,
                     batch_size=8, seed=0, num_workers=4,
-                    data_root="data", format_fn=None)   # None = stub until Lakshya's is ready
+                    data_root="data", format_fn=None)   # None = Lakshya's format_example
 batch = next(iter(dl))
 # pixel_values [B,3,384,384] | input_ids, attention_mask, labels [B,L]
 ```
@@ -342,6 +342,20 @@ Divya's track (D1–D8) is finished and runs on a temporary stand-in formatter, 
    - On `samples.html`: the decoded input should follow the agreed format, and the green trained text should be **only** the assistant's answers.
 3. Compare with the stub's numbers (D6 and D7 results above). Sequence lengths and the share of trained tokens should be close: about 6% for Stage 1 and 44% for Stage 2. A large change means a difference in masking or the template, so look into it before training.
 4. Once both pass, delete `src/data/formatting_stub.py` and hand `get_dataloader` to Ritwik and Vinod.
+
+**Handoff results (done 2026-11-25).** `format_example` from `src/data/formatting.py` is now the default in `VLMDataset` and `get_dataloader`, `scripts/sanity_check.py` uses its `get_tokenizer`, and the stub is deleted.
+
+- `python tests/test_loader.py`: **ALL CHECKS PASSED**. Batch shapes: Stage 1 `input_ids` [8, 224], Stage 2 [8, 792].
+- `python scripts/sanity_check.py`: runs cleanly. Loader speed on the pilot is 799 examples/s for Stage 1 and 570 examples/s for Stage 2 (batch 16, 4 workers, laptop).
+- Comparison with the stub on the overfit sets:
+
+| | Stage 1 real / stub | Stage 2 real / stub |
+|---|---|---|
+| Length min / median / max | 210 / 217 / 242 vs 202 / 212 / 238 | 289 / 362 / 791 vs 279 / 352 / 781 |
+| Share of tokens trained on | 5.8% vs 6.0% | 43.3% vs 44.3% |
+
+  The sequences are about 8–10 tokens longer because of the longer Qwen default system prompt. The trained share is slightly lower for the same reason. Masking is unchanged.
+- **Next:** hand `get_dataloader` to Ritwik and Vinod.
 
 #### Image-token format (our decision)
 

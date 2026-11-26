@@ -6,8 +6,7 @@ Each item is a dict:
   labels        long tensor  [L]             (-100 = not trained on)
 
 Text formatting is delegated to `format_fn(conversation, stage, text_only=...)`,
-which is Lakshya's `format_example`. Until it is ready, the stub in
-`formatting_stub.py` is used and a warning is printed.
+which defaults to Lakshya's `format_example` in `src/data/formatting.py`.
 """
 
 import json
@@ -43,13 +42,12 @@ class VLMDataset(Dataset):
         json_path   LLaVA-format JSON (list of {"id", "image", "conversations"})
         image_dir   folder that `example["image"]` is relative to
         stage       1 (alignment) or 2 (instruction tuning); passed to format_fn
-        format_fn   Lakshya's format_example; defaults to the temporary stub
+        format_fn   formatter; defaults to src.data.formatting.format_example
         text_only   skip images entirely (E0 and the no-image test)
         bad_images  set of image names to drop (see load_bad_images)
         """
         if format_fn is None:
-            from src.data.formatting_stub import format_example as format_fn
-            warnings.warn("VLMDataset is using the formatting STUB; pass Lakshya's format_example when ready")
+            from src.data.formatting import format_example as format_fn
         self.format_fn = format_fn
         self.image_dir = Path(image_dir)
         self.stage = stage
