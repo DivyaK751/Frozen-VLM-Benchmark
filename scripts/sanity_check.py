@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root, for `
 warnings.simplefilter("ignore")
 
 from src.data.dataset import VLMDataset  # noqa: E402
-from src.data.formatting_stub import get_tokenizer  # noqa: E402
+from src.data.formatting import get_tokenizer  # noqa: E402
 from src.data.loader import SPLITS, get_dataloader  # noqa: E402
 
 IMG_TOKEN = "<|image_pad|>"
