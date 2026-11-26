@@ -16,11 +16,8 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader, Subset
 
+from src.config import IGNORE_INDEX, MAX_LEN, PAD_TOKEN_ID
 from src.data.dataset import VLMDataset, load_bad_images
-
-PAD_TOKEN_ID = 151643   # Qwen2.5 <|endoftext|>
-IGNORE_INDEX = -100
-MAX_LEN = 2048
 
 # Where each split lives, relative to data_root. "full" image folders are where the
 # zips get extracted on the training machine (raw/pretrain/images.zip, raw/coco/train2017.zip).
