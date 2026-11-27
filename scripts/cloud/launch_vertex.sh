@@ -25,9 +25,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-PROJECT=${PROJECT:-encouraging-art-515701-r8}
+PROJECT=${PROJECT:-build-a-small-vlm}
 REGION=${REGION:-us-central1}
-BUCKET=${BUCKET:-frozen-vlm-benchmark}
+BUCKET=${BUCKET:-build-a-small-vlm-data}
 REPO=vlm
 IMAGE=$REGION-docker.pkg.dev/$PROJECT/$REPO/train:latest
 MACHINE=${MACHINE:-a2-highgpu-1g}
@@ -62,7 +62,7 @@ build)
   ;;
 upload-pilot)
   [ -d data/pilot ] || { echo "data/pilot not found (run scripts/download_pilot.py and scripts/make_subsets.py first)"; exit 1; }
-  doit $G storage cp -r data/pilot/. gs://$BUCKET/pilot_data/
+  doit $G storage rsync -r data/pilot gs://$BUCKET/pilot_data
   ;;
 run)
   NAME=${2:?usage: run NAME DATA -- COMMAND}; DATA=${3:?usage: run NAME DATA -- COMMAND}
@@ -94,7 +94,7 @@ workerPoolSpecs:
   containerSpec:
     imageUri: $IMAGE
     command: ["bash", "-c"]
-    args: ["tar xzf /gcs/$BUCKET/jobs/train/code.tgz -C /app && DATA=$DATA bash /app/scripts/cloud/vertex_entry.sh $CMD"]
+    args: ["tar xzf /gcs/$BUCKET/jobs/train/code.tgz -C /app && DATA=$DATA BUCKET_MOUNT=/gcs/$BUCKET bash /app/scripts/cloud/vertex_entry.sh $CMD"]
 $STRATEGY
 YAML
   if [ "$DRY_RUN" = 1 ]; then echo "--- job.yaml ---"; cat "$TMP/job.yaml"; fi
