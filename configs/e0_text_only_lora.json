@@ -1,0 +1,20 @@
+{
+  "name": "e0_text_only_lora",
+  "output_dir": "outputs/e0_text_only_lora_seed0",
+  "seed": 0,
+  "stage": 2,
+  "split": "full",
+  "text_only": true,
+  "epochs": 1,
+  "micro_batch_size": 16,
+  "grad_accum": 8,
+  "lr_lora": 2e-4,
+  "warmup_ratio": 0.03,
+  "lora": true,
+  "lora_rank": 16,
+  "lora_alpha": 32,
+  "lora_dropout": 0.05,
+  "num_workers": 8,
+  "log_every": 10,
+  "save_every_steps": 100
+}

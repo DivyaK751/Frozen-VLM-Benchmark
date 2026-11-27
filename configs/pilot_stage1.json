@@ -1,0 +1,14 @@
+{
+  "name": "pilot_stage1",
+  "output_dir": "outputs/pilot_stage1",
+  "stage": 1,
+  "split": "pilot",
+  "max_steps": 60,
+  "micro_batch_size": 32,
+  "grad_accum": 4,
+  "lr_projector": 1e-3,
+  "lora": false,
+  "num_workers": 8,
+  "log_every": 5,
+  "save_every_steps": 30
+}

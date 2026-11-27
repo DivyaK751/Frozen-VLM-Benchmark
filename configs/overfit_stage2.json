@@ -1,0 +1,16 @@
+{
+  "name": "overfit_stage2",
+  "output_dir": "outputs/overfit_stage2",
+  "stage": 2,
+  "split": "overfit",
+  "max_steps": 300,
+  "micro_batch_size": 4,
+  "grad_accum": 2,
+  "lr_projector": 1e-3,
+  "lr_lora": 2e-4,
+  "lora": true,
+  "num_workers": 2,
+  "log_every": 10,
+  "save_every_steps": 100,
+  "image_shuffle_check": true
+}
