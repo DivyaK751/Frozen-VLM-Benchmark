@@ -11,3 +11,8 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 HF_HOME=/tmp/hf TOKENIZERS_PARALLELISM=false
+
+# torch gets upgraded by pip, which breaks the old torchvision from the base image; we do not use it
+RUN pip uninstall -y torchvision torchaudio
+# fail the build, not a GPU job, if the imports are broken
+RUN python -c "from transformers import SiglipVisionModel, AutoModelForCausalLM; import torch, peft, transformers; print(torch.__version__, transformers.__version__, peft.__version__)"
